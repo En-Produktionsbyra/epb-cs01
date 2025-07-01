@@ -29,7 +29,8 @@ import {
   Person20Regular,
   FolderOpen20Regular,
 } from '@fluentui/react-icons';
-import { searchFiles, fetchDisks } from '../../utils/api';
+
+import { fetchDisks as getDisks, searchFiles } from '../../utils/api';
 
 const useStyles = makeStyles({
   container: {
@@ -106,6 +107,7 @@ const useStyles = makeStyles({
   },
 });
 
+
 const Search = () => {
   const styles = useStyles();
   const navigate = useNavigate();
@@ -136,9 +138,10 @@ const Search = () => {
     }
   }, [searchParams]);
 
-  const fetchDisks = async () => {
+  
+  const loadDisks = async () => {
     try {
-      const data = await fetchDisks(); 
+      const data = await getDisks();
       setDisks(data || []);
     } catch (err) {
       console.error('Kunde inte hämta diskar:', err);
@@ -164,7 +167,6 @@ const Search = () => {
         project: projectFilter || null,
         disk_id: diskFilter || null
       });
-      
       setResults(data.files || []);
     } catch (err) {
       setError(err.message);
@@ -172,6 +174,7 @@ const Search = () => {
     }
     setLoading(false);
   };
+
 
   const handleSearch = () => {
     if (query.trim()) {

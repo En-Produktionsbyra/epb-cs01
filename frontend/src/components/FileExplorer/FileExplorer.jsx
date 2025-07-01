@@ -299,7 +299,7 @@ const FileExplorer = () => {
   return (
     <div className={styles.container}>
       {/* Debug Information */}
-      {process.env.NODE_ENV === 'development' && (
+      {/* {process.env.NODE_ENV === 'development' && (
         <Card className={styles.debugCard}>
           <Text size={300} weight="semibold" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {debugInfo.success ? (
@@ -318,7 +318,7 @@ const FileExplorer = () => {
             {debugInfo.error && `Error: ${debugInfo.error}`}
           </div>
         </Card>
-      )}
+      )} */}
 
       {/* Error Card */}
       {error && (
@@ -355,14 +355,19 @@ const FileExplorer = () => {
             {breadcrumbItems.map((item, index) => (
               <React.Fragment key={index}>
                 <BreadcrumbItem>
-                  <Button
-                    appearance="subtle"
-                    icon={index === 0 ? <Storage20Regular /> : <Folder20Regular />}
-                    disabled={item.isLast}
-                    onClick={() => handleBreadcrumbClick(item.path)}
+                  <div 
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '4px',
+                      cursor: item.isLast ? 'default' : 'pointer',
+                      opacity: item.isLast ? 0.6 : 1
+                    }}
+                    onClick={() => !item.isLast && handleBreadcrumbClick(item.path)}
                   >
+                    {index === 0 ? <Storage20Regular /> : <Folder20Regular />}
                     {item.text}
-                  </Button>
+                  </div>
                 </BreadcrumbItem>
                 {index < breadcrumbItems.length - 1 && <BreadcrumbDivider />}
               </React.Fragment>
