@@ -28,6 +28,7 @@ import {
   Storage20Regular,
   Person20Regular,
   FolderOpen20Regular,
+  ChevronRight20Regular,
 } from '@fluentui/react-icons';
 
 import { fetchDisks as getDisks, searchFiles } from '../../utils/api';
@@ -38,51 +39,188 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.padding('24px'),
+    // På mobil: mindre padding
+    '@media (max-width: 768px)': {
+      ...shorthands.padding('16px'),
+    },
   },
+  
   searchHeader: {
     marginBottom: '24px',
+    // På mobil: mindre margin
+    '@media (max-width: 768px)': {
+      marginBottom: '16px',
+    },
   },
+  
   searchForm: {
     display: 'flex',
     gap: '12px',
     marginBottom: '16px',
     alignItems: 'end',
+    // På mobil: stack vertikalt
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+      gap: '8px',
+    },
   },
+  
   searchInput: {
     flex: 1,
     maxWidth: '400px',
+    // På mobil: full bredd
+    '@media (max-width: 768px)': {
+      maxWidth: '100%',
+    },
   },
+  
   filters: {
     display: 'flex',
     gap: '12px',
     flexWrap: 'wrap',
     alignItems: 'center',
     marginBottom: '16px',
+    // På mobil: mindre gap
+    '@media (max-width: 768px)': {
+      gap: '8px',
+    },
   },
+  
   filterDropdown: {
     minWidth: '150px',
+    // På mobil: mindre bredd
+    '@media (max-width: 768px)': {
+      minWidth: '120px',
+      fontSize: tokens.fontSizeBase200,
+    },
   },
+  
   results: {
     flex: 1,
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
   },
+  
+  // Desktop: Grid view
   grid: {
     flex: 1,
     overflow: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    // Dölj på mobil
+    '@media (max-width: 768px)': {
+      display: 'none',
+    },
   },
+  
+  // Mobile: List view
+  mobileList: {
+    flex: 1,
+    overflow: 'auto',
+    display: 'none',
+    flexDirection: 'column',
+    gap: '8px',
+    // Visa bara på mobil
+    '@media (max-width: 768px)': {
+      display: 'flex',
+    },
+  },
+  
+  // Mobile result item
+  mobileResultItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    ...shorthands.padding('12px', '16px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    minHeight: '64px', // Touch-friendly
+    transition: 'all 0.2s ease',
+    
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      transform: 'translateY(-1px)',
+      boxShadow: tokens.shadow4,
+    },
+    
+    '&:active': {
+      transform: 'translateY(0)',
+    },
+  },
+  
+  fileIcon: {
+    fontSize: '24px',
+    flexShrink: 0,
+    color: tokens.colorBrandForeground1,
+  },
+  
+  fileContent: {
+    flex: 1,
+    minWidth: 0, // Allow text truncation
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  
+  fileName: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    
+    // Truncate long names
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  
+  fileDetails: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+  
+  fileInfo: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    fontFamily: 'monospace',
+  },
+  
+  filePath: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    fontFamily: 'monospace',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '200px',
+  },
+  
+  mobileBadge: {
+    fontSize: tokens.fontSizeBase100,
+  },
+  
   loading: {
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
     height: '200px',
   },
+  
   noResults: {
     textAlign: 'center',
     ...shorthands.padding('48px', '24px'),
     color: tokens.colorNeutralForeground2,
+    // På mobil: mindre padding
+    '@media (max-width: 768px)': {
+      ...shorthands.padding('32px', '16px'),
+    },
   },
+  
   stats: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -90,23 +228,20 @@ const useStyles = makeStyles({
     ...shorthands.padding('12px', '0'),
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     marginBottom: '16px',
-  },
-  resultCard: {
-    marginBottom: '12px',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    '&:hover': {
-      transform: 'translateY(-1px)',
-      boxShadow: tokens.shadow4,
+    // På mobil: stack vertikalt om nödvändigt
+    '@media (max-width: 480px)': {
+      flexDirection: 'column',
+      alignItems: 'flex-start',
+      gap: '8px',
     },
   },
+  
   pathCell: {
     fontFamily: 'monospace',
     fontSize: '12px',
     color: tokens.colorNeutralForeground2,
   },
 });
-
 
 const Search = () => {
   const styles = useStyles();
@@ -121,24 +256,20 @@ const Search = () => {
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [disks, setDisks] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Hämta diskar för filter
+  // Detect mobile
   useEffect(() => {
-    loadDisks(); // Istället för fetchDisks
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Synka URL med state
-  useEffect(() => {
-    const urlQuery = searchParams.get('q') || '';
-    if (urlQuery !== query) {
-      setQuery(urlQuery);
-      if (urlQuery.length >= 3) {
-        performSearch(urlQuery);
-      }
-    }
-  }, [searchParams]);
-
-  
+  // Load disks for filters
   const loadDisks = async () => {
     try {
       const data = await getDisks();
@@ -148,6 +279,21 @@ const Search = () => {
       setDisks([]);
     }
   };
+
+  useEffect(() => {
+    loadDisks();
+  }, []);
+
+  // Sync URL with state
+  useEffect(() => {
+    const urlQuery = searchParams.get('q') || '';
+    if (urlQuery !== query) {
+      setQuery(urlQuery);
+      if (urlQuery.length >= 3) {
+        performSearch(urlQuery);
+      }
+    }
+  }, [searchParams]);
 
   const performSearch = async (searchQuery = query) => {
     if (!searchQuery.trim() || searchQuery.length < 3) {
@@ -175,7 +321,6 @@ const Search = () => {
     setLoading(false);
   };
 
-
   const handleSearch = () => {
     if (query.trim()) {
       setSearchParams({ q: query.trim() });
@@ -190,7 +335,6 @@ const Search = () => {
   };
 
   const handleFileClick = (file) => {
-    // Navigera till filen i FileExplorer
     if (file.disk_id) {
       const path = file.file_path || '';
       if (path) {
@@ -221,11 +365,10 @@ const Search = () => {
 
   const getFileIcon = (filename) => {
     const ext = filename?.split('.').pop()?.toLowerCase();
-    // Förenklad - bara Document-ikon för nu
-    return Document20Regular;
+    return Document20Regular; // Simplified for now
   };
 
-  // DataGrid kolumner
+  // Desktop DataGrid columns
   const columns = [
     createTableColumn({
       columnId: 'name',
@@ -301,7 +444,7 @@ const Search = () => {
     }),
   ];
 
-  // Extrahera unika kunder och projekt från diskar
+  // Extract unique clients and projects from disks
   const uniqueClients = [...new Set(disks.flatMap(d => d.top_clients?.map(c => c.client) || []))];
   const uniqueProjects = [...new Set(disks.flatMap(d => d.top_projects?.map(p => p.project) || []))];
 
@@ -328,6 +471,12 @@ const Search = () => {
             appearance="primary"
             onClick={handleSearch}
             disabled={!query.trim() || query.length < 3 || loading}
+            style={{
+              // På mobil: full bredd
+              '@media (max-width: 768px)': {
+                width: '100%',
+              },
+            }}
           >
             {loading ? 'Söker...' : 'Sök'}
           </Button>
@@ -427,7 +576,7 @@ const Search = () => {
               )}
             </div>
 
-            {/* Results Grid */}
+            {/* Results */}
             {results.length === 0 ? (
               <div className={styles.noResults}>
                 <Search20Regular style={{ fontSize: '48px', marginBottom: '16px' }} />
@@ -437,38 +586,102 @@ const Search = () => {
                 <Text>Prova att ändra din sökterm eller justera filtren</Text>
               </div>
             ) : (
-              <DataGrid
-                items={results}
-                columns={columns}
-                sortable
-                className={styles.grid}
-                getRowId={(item, index) => `${item.disk_id}-${item.full_path}-${index}`}
-              >
-                <DataGridHeader>
-                  <DataGridRow>
-                    {({ renderHeaderCell }) => (
-                      <DataGridHeaderCell>
-                        {renderHeaderCell()}
-                      </DataGridHeaderCell>
-                    )}
-                  </DataGridRow>
-                </DataGridHeader>
-                <DataGridBody>
-                  {({ item, rowId }) => (
-                    <DataGridRow 
-                      key={rowId}
-                      style={{ cursor: 'pointer' }}
+              <>
+                {/* Desktop: DataGrid */}
+                <div className={styles.grid}>
+                  <DataGrid
+                    items={results}
+                    columns={columns}
+                    sortable
+                    getRowId={(item, index) => `${item.disk_id}-${item.full_path}-${index}`}
+                  >
+                    <DataGridHeader>
+                      <DataGridRow>
+                        {({ renderHeaderCell }) => (
+                          <DataGridHeaderCell>
+                            {renderHeaderCell()}
+                          </DataGridHeaderCell>
+                        )}
+                      </DataGridRow>
+                    </DataGridHeader>
+                    <DataGridBody>
+                      {({ item, rowId }) => (
+                        <DataGridRow 
+                          key={rowId}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => handleFileClick(item)}
+                        >
+                          {({ renderCell }) => (
+                            <DataGridCell>
+                              {renderCell(item)}
+                            </DataGridCell>
+                          )}
+                        </DataGridRow>
+                      )}
+                    </DataGridBody>
+                  </DataGrid>
+                </div>
+
+                {/* Mobile: List View */}
+                <div className={styles.mobileList}>
+                  {results.map((item, index) => (
+                    <div
+                      key={`${item.disk_id}-${item.full_path}-${index}`}
+                      className={styles.mobileResultItem}
                       onClick={() => handleFileClick(item)}
                     >
-                      {({ renderCell }) => (
-                        <DataGridCell>
-                          {renderCell(item)}
-                        </DataGridCell>
-                      )}
-                    </DataGridRow>
-                  )}
-                </DataGridBody>
-              </DataGrid>
+                      <div className={styles.fileIcon}>
+                        <Document20Regular />
+                      </div>
+                      
+                      <div className={styles.fileContent}>
+                        <div className={styles.fileName}>
+                          {item.filename}
+                        </div>
+                        
+                        <div className={styles.fileDetails}>
+                          {item.file_size && (
+                            <Text className={styles.fileInfo}>
+                              {formatFileSize(item.file_size)}
+                            </Text>
+                          )}
+                          
+                          {item.file_path && (
+                            <Text className={styles.filePath}>
+                              {item.file_path}
+                            </Text>
+                          )}
+                          
+                          {item.disk_name && (
+                            <Badge appearance="filled" color="brand" size="small" className={styles.mobileBadge}>
+                              {item.disk_name}
+                            </Badge>
+                          )}
+                          
+                          {item.client && (
+                            <Badge appearance="tint" color="success" size="small" className={styles.mobileBadge}>
+                              {item.client}
+                            </Badge>
+                          )}
+                          
+                          {item.project && (
+                            <Badge appearance="tint" color="warning" size="small" className={styles.mobileBadge}>
+                              {item.project}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <ChevronRight20Regular 
+                        style={{ 
+                          color: tokens.colorNeutralForeground2,
+                          flexShrink: 0,
+                        }} 
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </>
         )}

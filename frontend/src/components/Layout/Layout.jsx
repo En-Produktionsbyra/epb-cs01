@@ -15,7 +15,6 @@ import {
   makeStyles,
   tokens,
   shorthands,
-  useId,
 } from "@fluentui/react-components";
 import {
   Board20Filled,
@@ -27,126 +26,78 @@ import {
   PersonCircle32Regular,
   bundleIcon,
   Storage20Regular,
-  Navigation20Regular,
   Settings20Regular,
-  Home20Regular,
 } from "@fluentui/react-icons";
 
 const useStyles = makeStyles({
-  container: {
+  root: {
     display: 'flex',
     flexDirection: 'column',
     height: '100vh',
     width: '100vw',
-    backgroundColor: tokens.colorNeutralBackground1,
   },
   
-  // Mobile Header (bara synlig på mobil)
+  // Mobile header - endast synlig på små skärmar
   mobileHeader: {
-    display: 'none',
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    ...shorthands.padding('12px', '16px'),
+    display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    '@media (max-width: 768px)': {
-      display: 'flex',
-    },
-  },
-  
-  mobileTitle: {
-    flex: 1,
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
+    ...shorthands.padding('12px', '16px'),
+    backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
+    borderBottom: `1px solid ${tokens.colorBrandStroke1}`,
+    // Dölj på desktop
+    '@media (min-width: 768px)': {
+      display: 'none',
+    },
   },
   
   hamburgerButton: {
     backgroundColor: 'transparent',
     border: 'none',
     color: tokens.colorNeutralForegroundOnBrand,
+    cursor: 'pointer',
+    ...shorthands.padding('8px'),
+    borderRadius: tokens.borderRadiusSmall,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     '&:hover': {
       backgroundColor: tokens.colorBrandBackgroundHover,
     },
   },
   
-  // Main content area
-  content: {
-    flex: 1,
+  mobileTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+  },
+  
+  // Main content wrapper
+  contentWrapper: {
     display: 'flex',
+    flex: 1,
     overflow: 'hidden',
   },
   
-  // Navigation styles
+  // Navigation drawer
   navDrawer: {
-    position: 'relative',
-    zIndex: 1000,
-    // Desktop: alltid synlig
-    '@media (min-width: 769px)': {
+    // På desktop: fast bredd sidebar
+    '@media (min-width: 768px)': {
       position: 'relative',
-    },
-    // Mobile: overlay
-    '@media (max-width: 768px)': {
-      position: 'fixed',
-      top: '56px', // Under mobile header
-      left: 0,
-      height: 'calc(100vh - 56px)',
-      boxShadow: tokens.shadow16,
+      width: '280px',
+      minWidth: '280px',
     },
   },
   
-  navDrawerClosed: {
-    '@media (max-width: 768px)': {
-      transform: 'translateX(-100%)',
-      transition: 'transform 0.3s ease',
-    },
-  },
-  
-  navDrawerOpen: {
-    '@media (max-width: 768px)': {
-      transform: 'translateX(0)',
-      transition: 'transform 0.3s ease',
-    },
-  },
-  
-  // Main content
-  main: {
+  // Main content area
+  mainContent: {
     flex: 1,
     overflow: 'auto',
-    backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.padding('24px'),
-    // På mobil: fyll hela bredden
-    '@media (max-width: 768px)': {
-      width: '100%',
+    // På mobil: mindre padding
+    '@media (max-width: 767px)': {
       ...shorthands.padding('16px'),
     },
-  },
-  
-  // Overlay för mobil när meny är öppen
-  overlay: {
-    display: 'none',
-    '@media (max-width: 768px)': {
-      display: 'block',
-      position: 'fixed',
-      top: '56px',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      zIndex: 999,
-    },
-  },
-  
-  // Navigation items
-  navItem: {
-    minHeight: '44px', // Touch-friendly
-    ...shorthands.margin('2px', '0'),
-  },
-  
-  activeNavItem: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
   },
   
   // Search container i navigation
@@ -158,6 +109,12 @@ const useStyles = makeStyles({
   searchInput: {
     width: '100%',
     marginBottom: '8px',
+  },
+  
+  // Navigation items
+  navItem: {
+    minHeight: '44px',
+    ...shorthands.margin('2px', '0'),
   },
 });
 
@@ -171,20 +128,18 @@ const Layout = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Mobile navigation state
-  const [isMobile, setIsMobile] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   
-  // Detect mobile on mount and resize
+  // Detect mobile screen size
   useEffect(() => {
     const checkMobile = () => {
-      const mobile = window.innerWidth <= 768;
+      const mobile = window.innerWidth < 768;
       setIsMobile(mobile);
+      
+      // På desktop: alltid öppen, på mobil: stängd som default
       if (!mobile) {
-        setIsNavOpen(true); // Desktop: alltid öppen
-      } else {
-        setIsNavOpen(false); // Mobile: börja stängd
+        setIsNavOpen(true);
       }
     };
     
@@ -193,12 +148,12 @@ const Layout = ({ children }) => {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
   
-  // Stäng meny när route ändras (på mobil)
+  // Stäng nav när man navigerar på mobil
   useEffect(() => {
     if (isMobile) {
       setIsNavOpen(false);
     }
-  }, [location.pathname, isMobile]);
+  }, [location.pathname]);
   
   const handleSearch = () => {
     if (searchQuery.trim()) {
@@ -224,10 +179,6 @@ const Layout = ({ children }) => {
     if (isMobile) setIsNavOpen(false);
   };
   
-  const toggleNav = () => {
-    setIsNavOpen(!isNavOpen);
-  };
-  
   const getPageTitle = () => {
     switch (location.pathname) {
       case '/': return 'Sök filer';
@@ -241,56 +192,44 @@ const Layout = ({ children }) => {
   };
 
   return (
-    <div className={styles.container}>
-      {/* Mobile Header */}
+    <div className={styles.root}>
+      {/* Mobile Header - endast synlig på mobil */}
       <div className={styles.mobileHeader}>
-        <div 
+        <button 
           className={styles.hamburgerButton}
-          onClick={toggleNav}
-          role="button"
-          tabIndex={0}
-          aria-label="Öppna navigation"
-          onKeyDown={(e) => e.key === 'Enter' && toggleNav()}
+          onClick={() => setIsNavOpen(!isNavOpen)}
+          aria-label="Växla navigation"
         >
           <Hamburger />
-        </div>
+        </button>
         <Text className={styles.mobileTitle}>
           {getPageTitle()}
         </Text>
       </div>
       
-      {/* Overlay för mobil */}
-      {isMobile && isNavOpen && (
-        <div className={styles.overlay} onClick={() => setIsNavOpen(false)} />
-      )}
-      
-      <div className={styles.content}>
+      {/* Main Content Wrapper */}
+      <div className={styles.contentWrapper}>
         {/* Navigation Drawer */}
         <NavDrawer
           open={isNavOpen}
           type={isMobile ? "overlay" : "inline"}
-          className={`${styles.navDrawer} ${
-            isNavOpen ? styles.navDrawerOpen : styles.navDrawerClosed
-          }`}
-          style={{
-            width: isNavOpen ? '280px' : '0px',
-            minWidth: isNavOpen ? '280px' : '0px',
-          }}
+          onOpenChange={(event, data) => setIsNavOpen(data.open)}
+          className={styles.navDrawer}
         >
           <NavDrawerHeader>
-            <AppItem
-              icon={<PersonCircle32Regular />}
-              as="div"
-            >
-              <Text weight="semibold">Cold Storage</Text>
-              <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                Filhanterare
-              </Text>
+            <AppItem icon={<PersonCircle32Regular />}>
+              <div>
+                <Text weight="semibold">Cold Storage</Text>
+                <br />
+                <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                  Filhanterare
+                </Text>
+              </div>
             </AppItem>
           </NavDrawerHeader>
 
           <NavDrawerBody>
-            {/* Search i navigation */}
+            {/* Search */}
             <div className={styles.searchContainer}>
               <Input
                 className={styles.searchInput}
@@ -314,10 +253,9 @@ const Layout = ({ children }) => {
             
             <NavDivider />
             
-            {/* Main Navigation - Använd as="div" för att undvika nested buttons */}
+            {/* Main Navigation */}
             <NavItem 
-              as="div"
-              className={`${styles.navItem} ${isActive('/dashboard') ? styles.activeNavItem : ''}`}
+              className={styles.navItem}
               onClick={() => handleNavItemClick('/dashboard')}
               icon={<Dashboard />}
               value="dashboard"
@@ -326,8 +264,7 @@ const Layout = ({ children }) => {
             </NavItem>
             
             <NavItem 
-              as="div"
-              className={`${styles.navItem} ${isActive('/search') || isActive('/') ? styles.activeNavItem : ''}`}
+              className={styles.navItem}
               onClick={() => handleNavItemClick('/')}
               icon={<SearchIcon />}
               value="search"
@@ -336,8 +273,7 @@ const Layout = ({ children }) => {
             </NavItem>
             
             <NavItem
-              as="div"
-              className={`${styles.navItem} ${isActive('/upload') ? styles.activeNavItem : ''}`}
+              className={styles.navItem}
               onClick={() => handleNavItemClick('/upload')}
               icon={<Upload />}
               value="upload"
@@ -350,17 +286,15 @@ const Layout = ({ children }) => {
             <NavSectionHeader>Verktyg</NavSectionHeader>
             
             <NavItem 
-              as="div"
               className={styles.navItem}
               icon={<Storage20Regular />} 
-              value="disks"
               onClick={() => handleNavItemClick('/dashboard')}
+              value="disks"
             >
               Hårddiskar
             </NavItem>
             
             <NavItem 
-              as="div"
               className={styles.navItem}
               icon={<Settings20Regular />} 
               value="settings"
@@ -371,7 +305,7 @@ const Layout = ({ children }) => {
         </NavDrawer>
         
         {/* Main Content */}
-        <main className={styles.main}>
+        <main className={styles.mainContent}>
           {children}
         </main>
       </div>

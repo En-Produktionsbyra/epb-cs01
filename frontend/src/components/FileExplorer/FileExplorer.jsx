@@ -5,6 +5,7 @@ import {
   Button,
   Spinner,
   Badge,
+  Card,
   makeStyles,
   tokens,
   shorthands,
@@ -19,7 +20,19 @@ import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbDivider,
-  Card,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+  Dialog,
+  DialogTrigger,
+  DialogSurface,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogBody,
+  Divider,
 } from '@fluentui/react-components';
 import {
   Storage20Regular,
@@ -29,8 +42,17 @@ import {
   FolderOpen20Regular,
   Warning20Regular,
   CheckmarkCircle20Regular,
+  ChevronDown20Regular,
+  Navigation20Regular,
+  MoreHorizontal20Regular,
+  Info20Regular,
+  Calendar20Regular,
+  Person20Regular,
+  Tag20Regular,
+  Shield20Regular,
+  Dismiss20Regular,
 } from '@fluentui/react-icons';
-import { browseDirectory } from '../../utils/api';
+import { fetchDisk, browseDirectory } from '../../utils/api';
 
 const useStyles = makeStyles({
   container: {
@@ -38,49 +60,268 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
   },
+  
+  // Mobile-first header
   header: {
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    gap: '8px',
     marginBottom: '16px',
     ...shorthands.padding('12px', '16px'),
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
+    
+    // Desktop: horizontal layout
+    '@media (min-width: 769px)': {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
   },
-  breadcrumbContainer: {
+  
+  // Navigation row (back button + breadcrumb)
+  navigationRow: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    minHeight: '44px', // Touch-friendly
   },
-  diskInfo: {
+  
+  // Stats row (badges)
+  statsRow: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    
+    // Desktop: align right
+    '@media (min-width: 769px)': {
+      justifyContent: 'flex-end',
+    },
+  },
+  
+  // Compact breadcrumb for mobile
+  breadcrumb: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '4px',
+    flex: 1,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    minWidth: 0, // Allow shrinking
+    
+    // Desktop: larger font
+    '@media (min-width: 769px)': {
+      fontSize: tokens.fontSizeBase300,
+    },
   },
+  
+  breadcrumbButton: {
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: tokens.colorBrandForeground1,
+    cursor: 'pointer',
+    ...shorthands.padding('4px', '8px'),
+    borderRadius: tokens.borderRadiusSmall,
+    maxWidth: '100%', // Don't exceed container
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  
+  // Content area
   content: {
     flex: 1,
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
   },
-  grid: {
+  
+  // Mobile: List view
+  mobileList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    overflow: 'auto',
+    ...shorthands.padding('0', '16px'),
+    
+    // Desktop: hide mobile list
+    '@media (min-width: 769px)': {
+      display: 'none',
+    },
+  },
+  
+  // Desktop: Grid view
+  desktopGrid: {
     flex: 1,
     overflow: 'auto',
+    display: 'none',
+    
+    // Desktop: show grid
+    '@media (min-width: 769px)': {
+      display: 'flex',
+      flexDirection: 'column',
+    },
   },
-  debugCard: {
-    marginBottom: '16px',
-    padding: '12px',
-    backgroundColor: tokens.colorNeutralBackground3,
+  
+  // File/folder item for mobile
+  mobileItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    ...shorthands.padding('12px', '16px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    minHeight: '56px', // Touch-friendly
+    transition: 'all 0.2s ease',
+    
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      transform: 'translateY(-1px)',
+      boxShadow: tokens.shadow4,
+    },
+    
+    '&:active': {
+      transform: 'translateY(0)',
+    },
   },
-  debugText: {
-    fontFamily: 'monospace',
-    fontSize: '12px',
+  
+  itemIcon: {
+    fontSize: '24px',
+    flexShrink: 0,
   },
+  
+  itemContent: {
+    flex: 1,
+    minWidth: 0, // Allow text truncation
+  },
+  
+  itemName: {
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase300,
+    marginBottom: '2px',
+    
+    // Truncate long names
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  
+  itemDetails: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+  },
+  
+  // Path navigation menu
+  pathMenu: {
+    maxHeight: '300px',
+    overflow: 'auto',
+  },
+  
+  pathMenuItem: {
+    minHeight: '44px',
+    ...shorthands.padding('8px', '12px'),
+  },
+  
+  // Loading and error states
+  centerContent: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '200px',
+    flexDirection: 'column',
+    gap: '16px',
+    textAlign: 'center',
+    ...shorthands.padding('32px'),
+  },
+  
   errorCard: {
     marginBottom: '16px',
-    padding: '16px',
+    ...shorthands.padding('16px'),
     backgroundColor: tokens.colorPaletteRedBackground1,
     borderLeft: `4px solid ${tokens.colorPaletteRedForeground1}`,
+  },
+
+  // File details dialog
+  fileDialog: {
+    minWidth: '90vw',
+    maxWidth: '95vw',
+    
+    // Desktop: larger dialog
+    '@media (min-width: 769px)': {
+      minWidth: '500px',
+      maxWidth: '600px',
+    },
+  },
+
+  fileHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '16px',
+  },
+
+  fileIcon: {
+    fontSize: '32px',
+    flexShrink: 0,
+  },
+
+  fileName: {
+    flex: 1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+    wordBreak: 'break-word',
+  },
+
+  detailsGrid: {
+    display: 'grid',
+    gap: '16px',
+  },
+
+  detailRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '12px',
+    ...shorthands.padding('8px', '0'),
+  },
+
+  detailLabel: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    minWidth: '100px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+
+  detailValue: {
+    flex: 1,
+    textAlign: 'right',
+    wordBreak: 'break-word',
+    fontFamily: 'monospace',
+    fontSize: tokens.fontSizeBase200,
+  },
+
+  badgeContainer: {
+    display: 'flex',
+    gap: '6px',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+
+  copyButton: {
+    fontSize: tokens.fontSizeBase100,
+    minHeight: '24px',
+    ...shorthands.padding('2px', '8px'),
   },
 });
 
@@ -93,12 +334,25 @@ const FileExplorer = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [debugInfo, setDebugInfo] = useState({});
+  const [isMobile, setIsMobile] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [showFileDialog, setShowFileDialog] = useState(false);
 
-  // Extrahera nuvarande sökväg från URL
+  // Extract current path from URL
   const currentPath = location.pathname.includes('/browse/') 
     ? decodeURIComponent(location.pathname.split('/browse/')[1] || '')
     : '';
+
+  // Detect mobile on mount and resize
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     if (diskId) {
@@ -109,18 +363,9 @@ const FileExplorer = () => {
 
   const fetchDiskInfo = async () => {
     try {
-      console.log('🔍 Fetching disk info for:', diskId);
-      const response = await fetch(`${window.location.protocol}//${window.location.hostname}:8000/disks/${diskId}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Disk info loaded:', data);
+      const data = await fetchDisk(diskId);
       setDisk(data);
     } catch (err) {
-      console.error('❌ Failed to fetch disk info:', err);
       setError(`Kunde inte hämta disk info: ${err.message}`);
     }
   };
@@ -129,50 +374,29 @@ const FileExplorer = () => {
     setLoading(true);
     setError('');
     
-    const debug = {
-      diskId,
-      currentPath: currentPath || 'ROOT',
-      timestamp: new Date().toISOString(),
-      frontend: window.location.origin,
-      apiUrl: `${window.location.protocol}//${window.location.hostname}:8000`,
-    };
-    
     try {
-      console.log('🗂️ Fetching directory contents:', debug);
-      
-      // Använd browseDirectory från api.js
       const data = await browseDirectory(diskId, currentPath || null);
-      
-      console.log('✅ Directory contents loaded:', data);
-      
-      debug.success = true;
-      debug.itemCount = data.items?.length || 0;
-      debug.directoryCount = data.directory_count;
-      debug.fileCount = data.file_count;
-      
       setItems(data.items || []);
-      
     } catch (err) {
-      console.error('❌ Failed to fetch directory contents:', err);
-      
-      debug.success = false;
-      debug.error = err.message;
-      debug.errorType = err.name;
-      
       setError(`Kunde inte hämta kataloginnehåll: ${err.message}`);
       setItems([]);
     }
     
-    setDebugInfo(debug);
     setLoading(false);
   };
 
-  const handleFolderClick = (folderName) => {
-    const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
-    navigate(`/disks/${diskId}/browse/${encodeURIComponent(newPath)}`);
+  const handleItemClick = (item) => {
+    if (item.type === 'folder') {
+      const newPath = currentPath ? `${currentPath}/${item.filename}` : item.filename;
+      navigate(`/disks/${diskId}/browse/${encodeURIComponent(newPath)}`);
+    } else {
+      // For files, show details dialog
+      setSelectedFile(item);
+      setShowFileDialog(true);
+    }
   };
 
-  const handleBreadcrumbClick = (path) => {
+  const handlePathNavigation = (path) => {
     if (path === '') {
       navigate(`/disks/${diskId}`);
     } else {
@@ -181,7 +405,7 @@ const FileExplorer = () => {
   };
 
   const formatFileSize = (bytes) => {
-    if (!bytes) return '-';
+    if (!bytes) return '';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     const k = 1024;
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -189,16 +413,90 @@ const FileExplorer = () => {
   };
 
   const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('sv-SE');
+    if (!dateString) return 'Okänt';
+    try {
+      return new Date(dateString).toLocaleDateString('sv-SE', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return 'Okänt';
+    }
   };
 
-  const truncateText = (text, maxLength = 40) => {
-    if (!text || text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
+  const getFileTypeIcon = (filename, mimeType) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    const mime = mimeType?.toLowerCase() || '';
+    
+    // Video files
+    if (mime.startsWith('video/') || ['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv'].includes(ext)) {
+      return '🎬';
+    }
+    // Image files
+    if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+      return '🖼️';
+    }
+    // Audio files
+    if (mime.startsWith('audio/') || ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg'].includes(ext)) {
+      return '🎵';
+    }
+    // Archive files
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) {
+      return '📦';
+    }
+    // Document files
+    if (['pdf', 'doc', 'docx', 'txt', 'rtf'].includes(ext)) {
+      return '📄';
+    }
+    // Spreadsheet files
+    if (['xls', 'xlsx', 'csv'].includes(ext)) {
+      return '📊';
+    }
+    // Presentation files
+    if (['ppt', 'pptx'].includes(ext)) {
+      return '📈';
+    }
+    
+    return '📄'; // Default
   };
 
-  // Breadcrumb items
+  const copyToClipboard = async (text) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        // Optionally show a toast/notification here
+      } else {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
+
+  // Build the full path for display
+  const getFullPath = (item) => {
+    if (!item) return '';
+    
+    // Construct full path from current location + filename
+    const basePath = currentPath ? `${currentPath}/${item.filename}` : item.filename;
+    return basePath;
+  };
+
+  // Get display path (just the directory)
+  const getDisplayPath = () => {
+    return currentPath || '/';
+  };
+
+  // Generate breadcrumb items
   const breadcrumbItems = React.useMemo(() => {
     const items = [{ text: disk?.disk_name || diskId, path: '' }];
     
@@ -219,7 +517,37 @@ const FileExplorer = () => {
     return items;
   }, [disk, diskId, currentPath]);
 
-  // DataGrid kolumner
+  // Mobile-friendly breadcrumb display with smart truncation
+  const getMobileBreadcrumb = () => {
+    if (breadcrumbItems.length <= 1) {
+      const text = breadcrumbItems[0]?.text || diskId;
+      // Truncate disk name if too long
+      return text.length > 20 ? `${text.substring(0, 17)}...` : text;
+    }
+    
+    const current = breadcrumbItems[breadcrumbItems.length - 1];
+    const root = breadcrumbItems[0].text;
+    
+    // Truncate current folder name if too long
+    const truncatedCurrent = current.text.length > 25 
+      ? `${current.text.substring(0, 22)}...` 
+      : current.text;
+    
+    // Truncate root name if too long
+    const truncatedRoot = root.length > 15 
+      ? `${root.substring(0, 12)}...` 
+      : root;
+    
+    if (breadcrumbItems.length === 2) {
+      // Just root and current: "Root / Current"
+      return `${truncatedRoot} / ${truncatedCurrent}`;
+    }
+    
+    // Long path: always show "Root / ... / Current" regardless of length
+    return `${truncatedRoot} / ... / ${truncatedCurrent}`;
+  };
+
+  // Desktop DataGrid columns
   const columns = [
     createTableColumn({
       columnId: 'name',
@@ -245,12 +573,7 @@ const FileExplorer = () => {
           )}
         >
           <Text weight={item.type === 'folder' ? 'semibold' : 'regular'}>
-            {truncateText(item.filename)}
-            {item.type === 'folder' && item.file_count > 0 && (
-              <Text size={200} style={{ marginLeft: '8px', color: tokens.colorNeutralForeground3 }}>
-                ({item.file_count} filer)
-              </Text>
-            )}
+            {item.filename}
           </Text>
         </TableCellLayout>
       ),
@@ -260,18 +583,8 @@ const FileExplorer = () => {
       compare: (a, b) => (a.file_size || 0) - (b.file_size || 0),
       renderHeaderCell: () => 'Storlek',
       renderCell: (item) => (
-        <Text style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-          {formatFileSize(item.file_size)}
-        </Text>
-      ),
-    }),
-    createTableColumn({
-      columnId: 'type',
-      renderHeaderCell: () => 'Typ',
-      renderCell: (item) => (
-        <Text>
-          {item.type === 'folder' ? 'Mapp' : 
-           item.filename?.split('.').pop()?.toUpperCase() || 'Fil'}
+        <Text style={{ fontFamily: 'monospace' }}>
+          {item.type === 'folder' ? 'Mapp' : formatFileSize(item.file_size)}
         </Text>
       ),
     }),
@@ -287,46 +600,20 @@ const FileExplorer = () => {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px' }}>
-        <Spinner label="Laddar mapp..." size="large" />
+      <div className={styles.centerContent}>
+        <Spinner label="Laddar katalog..." size="large" />
       </div>
     );
   }
 
-  const folders = items.filter(item => item.type === 'folder');
-  const files = items.filter(item => item.type === 'file');
-
-  return (
-    <div className={styles.container}>
-      {/* Debug Information */}
-      {/* {process.env.NODE_ENV === 'development' && (
-        <Card className={styles.debugCard}>
-          <Text size={300} weight="semibold" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            {debugInfo.success ? (
-              <CheckmarkCircle20Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
-            ) : (
-              <Warning20Regular style={{ color: tokens.colorPaletteRedForeground1 }} />
-            )}
-            Debug Info
-          </Text>
-          <div className={styles.debugText}>
-            API URL: {debugInfo.apiUrl}<br/>
-            Disk ID: {debugInfo.diskId}<br/>
-            Path: {debugInfo.currentPath}<br/>
-            Success: {debugInfo.success ? 'Yes' : 'No'}<br/>
-            Items: {debugInfo.itemCount} ({debugInfo.directoryCount} dirs, {debugInfo.fileCount} files)<br/>
-            {debugInfo.error && `Error: ${debugInfo.error}`}
-          </div>
-        </Card>
-      )} */}
-
-      {/* Error Card */}
-      {error && (
+  if (error) {
+    return (
+      <div className={styles.container}>
         <Card className={styles.errorCard}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Warning20Regular style={{ color: tokens.colorPaletteRedForeground1 }} />
             <Text weight="semibold" style={{ color: tokens.colorPaletteRedForeground1 }}>
-              Anslutningsfel
+              Fel
             </Text>
           </div>
           <Text style={{ marginTop: '8px' }}>{error}</Text>
@@ -338,102 +625,422 @@ const FileExplorer = () => {
             Försök igen
           </Button>
         </Card>
-      )}
+      </div>
+    );
+  }
 
+  const folders = items.filter(item => item.type === 'folder');
+  const files = items.filter(item => item.type === 'file');
+
+  return (
+    <div className={styles.container}>
       {/* Header */}
       <div className={styles.header}>
-        <div className={styles.breadcrumbContainer}>
+        {/* Navigation Row */}
+        <div className={styles.navigationRow}>
           <Button
             appearance="subtle"
             icon={<ArrowLeft20Regular />}
-            onClick={() => window.history.back()}
+            onClick={() => {
+              if (currentPath) {
+                const parentPath = currentPath.split('/').slice(0, -1).join('/');
+                handlePathNavigation(parentPath);
+              } else {
+                navigate('/dashboard');
+              }
+            }}
+            style={{ minHeight: '44px', minWidth: '44px' }}
           >
-            Tillbaka
+            {isMobile ? '' : 'Tillbaka'}
           </Button>
           
-          <Breadcrumb>
-            {breadcrumbItems.map((item, index) => (
-              <React.Fragment key={index}>
-                <BreadcrumbItem>
-                  <div 
-                    style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '4px',
-                      cursor: item.isLast ? 'default' : 'pointer',
-                      opacity: item.isLast ? 0.6 : 1
-                    }}
-                    onClick={() => !item.isLast && handleBreadcrumbClick(item.path)}
+          {/* Mobile: Compact breadcrumb with dropdown */}
+          {isMobile ? (
+            <div className={styles.breadcrumb}>
+              <Menu>
+                <MenuTrigger>
+                  <Button
+                    appearance="subtle"
+                    className={styles.breadcrumbButton}
+                    iconAfter={breadcrumbItems.length > 1 ? <ChevronDown20Regular /> : null}
                   >
-                    {index === 0 ? <Storage20Regular /> : <Folder20Regular />}
-                    {item.text}
-                  </div>
-                </BreadcrumbItem>
-                {index < breadcrumbItems.length - 1 && <BreadcrumbDivider />}
-              </React.Fragment>
-            ))}
-          </Breadcrumb>
+                    {getMobileBreadcrumb()}
+                  </Button>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList className={styles.pathMenu}>
+                    {breadcrumbItems.map((item, index) => (
+                      <MenuItem
+                        key={index}
+                        className={styles.pathMenuItem}
+                        onClick={() => handlePathNavigation(item.path)}
+                        disabled={item.isLast}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {index === 0 ? <Storage20Regular /> : <Folder20Regular />}
+                          <Text>{item.text}</Text>
+                          {item.isLast && <Text>(nuvarande)</Text>}
+                        </div>
+                      </MenuItem>
+                    ))}
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            </div>
+          ) : (
+            /* Desktop: Original Fluent UI Breadcrumb */
+            <Breadcrumb style={{ flex: 1 }}>
+              {breadcrumbItems.map((item, index) => (
+                <React.Fragment key={index}>
+                  <BreadcrumbItem>
+                    <div 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '4px',
+                        cursor: item.isLast ? 'default' : 'pointer',
+                        opacity: item.isLast ? 0.6 : 1,
+                        padding: '4px 8px',
+                        borderRadius: tokens.borderRadiusSmall,
+                      }}
+                      onClick={() => !item.isLast && handlePathNavigation(item.path)}
+                    >
+                      {index === 0 ? <Storage20Regular /> : <Folder20Regular />}
+                      {item.text}
+                    </div>
+                  </BreadcrumbItem>
+                  {index < breadcrumbItems.length - 1 && <BreadcrumbDivider />}
+                </React.Fragment>
+              ))}
+            </Breadcrumb>
+          )}
         </div>
         
-        <div className={styles.diskInfo}>
-          <Badge appearance="filled" color="brand">
+        {/* Stats Row */}
+        <div className={styles.statsRow}>
+          <Badge appearance="filled" color="brand" size={isMobile ? "medium" : "small"}>
             {folders.length} mappar
           </Badge>
-          <Badge appearance="filled" color="success">
+          <Badge appearance="filled" color="success" size={isMobile ? "medium" : "small"}>
             {files.length} filer
           </Badge>
-          <Badge appearance="tint">
-            Total: {disk?.actual_file_count?.toLocaleString() || '0'} filer
-          </Badge>
+          {disk?.actual_file_count && (
+            <Badge appearance="tint" size={isMobile ? "medium" : "small"}>
+              Total: {disk.actual_file_count.toLocaleString()}
+            </Badge>
+          )}
         </div>
       </div>
 
-      {/* File/Folder Grid */}
+      {/* Content */}
       <div className={styles.content}>
-        {items.length === 0 && !error ? (
-          <div style={{ textAlign: 'center', padding: '60px' }}>
-            <FolderOpen20Regular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3, marginBottom: '16px' }} />
-            <Text>Mappen är tom</Text>
+        {items.length === 0 ? (
+          <div className={styles.centerContent}>
+            <FolderOpen20Regular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
+            <Text size={500} weight="semibold">
+              Mappen är tom
+            </Text>
           </div>
         ) : (
-          <DataGrid
-            items={items}
-            columns={columns}
-            sortable
-            className={styles.grid}
-            getRowId={(item, index) => `${item.type}-${item.filename}-${index}`}
-          >
-            <DataGridHeader>
-              <DataGridRow>
-                {({ renderHeaderCell }) => (
-                  <DataGridHeaderCell>
-                    {renderHeaderCell()}
-                  </DataGridHeaderCell>
-                )}
-              </DataGridRow>
-            </DataGridHeader>
-            <DataGridBody>
-              {({ item, rowId }) => (
-                <DataGridRow 
-                  key={rowId}
-                  style={{ cursor: item.type === 'folder' ? 'pointer' : 'default' }}
-                  onClick={() => {
-                    if (item.type === 'folder') {
-                      handleFolderClick(item.filename);
-                    }
-                  }}
+          <>
+            {/* Mobile: List View */}
+            <div className={styles.mobileList}>
+              {items.map((item, index) => (
+                <div
+                  key={`${item.type}-${item.filename}-${index}`}
+                  className={styles.mobileItem}
+                  onClick={() => handleItemClick(item)}
                 >
-                  {({ renderCell }) => (
-                    <DataGridCell>
-                      {renderCell(item)}
-                    </DataGridCell>
+                  <div className={styles.itemIcon}>
+                    {item.type === 'folder' ? (
+                      <Folder20Regular style={{ color: tokens.colorPaletteBlueForeground1 }} />
+                    ) : (
+                      <Document20Regular style={{ color: tokens.colorBrandForeground1 }} />
+                    )}
+                  </div>
+                  
+                  <div className={styles.itemContent}>
+                    <div className={styles.itemName}>
+                      {item.filename}
+                    </div>
+                    <div className={styles.itemDetails}>
+                      {item.type === 'folder' ? (
+                        <Text>Mapp</Text>
+                      ) : (
+                        <>
+                          {formatFileSize(item.file_size) && (
+                            <Text>{formatFileSize(item.file_size)}</Text>
+                          )}
+                          {formatDate(item.modified_date) && (
+                            <Text>{formatDate(item.modified_date)}</Text>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {item.type === 'folder' && (
+                    <ChevronDown20Regular 
+                      style={{ 
+                        transform: 'rotate(-90deg)', 
+                        color: tokens.colorNeutralForeground2 
+                      }} 
+                    />
                   )}
-                </DataGridRow>
-              )}
-            </DataGridBody>
-          </DataGrid>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: Grid View */}
+            <div className={styles.desktopGrid}>
+              <DataGrid
+                items={items}
+                columns={columns}
+                sortable
+                getRowId={(item, index) => `${item.type}-${item.filename}-${index}`}
+              >
+                <DataGridHeader>
+                  <DataGridRow>
+                    {({ renderHeaderCell }) => (
+                      <DataGridHeaderCell>
+                        {renderHeaderCell()}
+                      </DataGridHeaderCell>
+                    )}
+                  </DataGridRow>
+                </DataGridHeader>
+                <DataGridBody>
+                  {({ item, rowId }) => (
+                    <DataGridRow 
+                      key={rowId}
+                      style={{ cursor: item.type === 'folder' ? 'pointer' : 'pointer' }}
+                      onClick={() => handleItemClick(item)}
+                    >
+                      {({ renderCell }) => (
+                        <DataGridCell>
+                          {renderCell(item)}
+                        </DataGridCell>
+                      )}
+                    </DataGridRow>
+                  )}
+                </DataGridBody>
+              </DataGrid>
+            </div>
+          </>
         )}
       </div>
+
+      {/* File Details Dialog */}
+      <Dialog open={showFileDialog} onOpenChange={(event, data) => setShowFileDialog(data.open)}>
+        <DialogSurface className={styles.fileDialog}>
+          <DialogTitle>
+            <div className={styles.fileHeader}>
+              <div className={styles.fileIcon}>
+                {selectedFile && getFileTypeIcon(selectedFile.filename, selectedFile.mime_type)}
+              </div>
+              <div className={styles.fileName}>
+                {selectedFile?.filename}
+              </div>
+              <Button
+                appearance="subtle"
+                icon={<Dismiss20Regular />}
+                onClick={() => setShowFileDialog(false)}
+                aria-label="Stäng"
+              />
+            </div>
+          </DialogTitle>
+          
+          <DialogBody>
+            <DialogContent>
+              {selectedFile && (
+                <div className={styles.detailsGrid}>
+                  {/* File Size */}
+                  <div className={styles.detailRow}>
+                    <div className={styles.detailLabel}>
+                      <Info20Regular />
+                      Storlek
+                    </div>
+                    <div className={styles.detailValue}>
+                      {formatFileSize(selectedFile.file_size)}
+                    </div>
+                  </div>
+
+                  {/* File Type & MIME */}
+                  {selectedFile.file_type && (
+                    <div className={styles.detailRow}>
+                      <div className={styles.detailLabel}>
+                        <Tag20Regular />
+                        Filtyp
+                      </div>
+                      <div className={styles.detailValue}>
+                        {selectedFile.file_type}
+                        {selectedFile.mime_type && (
+                          <Text style={{ display: 'block', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground2 }}>
+                            {selectedFile.mime_type}
+                          </Text>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* File Path */}
+                  <div className={styles.detailRow}>
+                    <div className={styles.detailLabel}>
+                      <Navigation20Regular />
+                      Sökväg
+                    </div>
+                    <div className={styles.detailValue}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Text style={{ flex: 1, fontSize: tokens.fontSizeBase100 }}>
+                          {getDisplayPath()}
+                        </Text>
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          className={styles.copyButton}
+                          onClick={() => copyToClipboard(getDisplayPath())}
+                        >
+                          Kopiera
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Full Path */}
+                  <div className={styles.detailRow}>
+                    <div className={styles.detailLabel}>
+                      <Navigation20Regular />
+                      Fullständig sökväg
+                    </div>
+                    <div className={styles.detailValue}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Text style={{ flex: 1, fontSize: tokens.fontSizeBase100 }}>
+                          {getFullPath(selectedFile)}
+                        </Text>
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          className={styles.copyButton}
+                          onClick={() => copyToClipboard(getFullPath(selectedFile))}
+                        >
+                          Kopiera
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Created Date */}
+                  {selectedFile.created_date && (
+                    <div className={styles.detailRow}>
+                      <div className={styles.detailLabel}>
+                        <Calendar20Regular />
+                        Skapad
+                      </div>
+                      <div className={styles.detailValue}>
+                        {formatDate(selectedFile.created_date)}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Modified Date */}
+                  {selectedFile.modified_date && (
+                    <div className={styles.detailRow}>
+                      <div className={styles.detailLabel}>
+                        <Calendar20Regular />
+                        Ändrad
+                      </div>
+                      <div className={styles.detailValue}>
+                        {formatDate(selectedFile.modified_date)}
+                      </div>
+                    </div>
+                  )}
+
+                  <Divider />
+
+                  {/* Client & Project */}
+                  {(selectedFile.client || selectedFile.project) && (
+                    <div className={styles.detailRow}>
+                      <div className={styles.detailLabel}>
+                        <Person20Regular />
+                        Organisation
+                      </div>
+                      <div className={styles.badgeContainer}>
+                        {selectedFile.client && (
+                          <Badge appearance="tint" color="success" size="small">
+                            {selectedFile.client}
+                          </Badge>
+                        )}
+                        {selectedFile.project && (
+                          <Badge appearance="tint" color="warning" size="small">
+                            {selectedFile.project}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Keywords */}
+                  {selectedFile.keywords && (
+                    <div className={styles.detailRow}>
+                      <div className={styles.detailLabel}>
+                        <Tag20Regular />
+                        Nyckelord
+                      </div>
+                      <div className={styles.detailValue}>
+                        {selectedFile.keywords}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Checksum - only show if available */}
+                  {selectedFile.checksum && (
+                    <div className={styles.detailRow}>
+                      <div className={styles.detailLabel}>
+                        <Shield20Regular />
+                        Checksumma
+                      </div>
+                      <div className={styles.detailValue}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Text style={{ flex: 1, fontSize: tokens.fontSizeBase100, fontFamily: 'monospace' }}>
+                            {selectedFile.checksum}
+                          </Text>
+                          <Button
+                            appearance="subtle"
+                            size="small"
+                            className={styles.copyButton}
+                            onClick={() => copyToClipboard(selectedFile.checksum)}
+                          >
+                            Kopiera
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Disk Info */}
+                  <Divider />
+                  <div className={styles.detailRow}>
+                    <div className={styles.detailLabel}>
+                      <Storage20Regular />
+                      Hårddisk
+                    </div>
+                    <div className={styles.detailValue}>
+                      <Badge appearance="filled" color="brand" size="small">
+                        {disk?.disk_name || diskId}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </DialogBody>
+
+          <DialogActions>
+            <Button appearance="primary" onClick={() => setShowFileDialog(false)}>
+              Stäng
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };
