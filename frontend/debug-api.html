@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Debug Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            padding: 10px; 
+            background: #f0f0f0; 
+            color: #333;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .log { 
+            margin: 3px 0; 
+            padding: 8px; 
+            border-left: 4px solid #007acc; 
+            background: white;
+            border-radius: 3px;
+            word-wrap: break-word;
+        }
+        .error { 
+            border-left-color: #f44747; 
+            background: #ffebee; 
+            color: #c62828;
+        }
+        .success { 
+            border-left-color: #4caf50; 
+            background: #e8f5e8; 
+            color: #2e7d32;
+        }
+        button { 
+            padding: 12px 20px; 
+            margin: 8px 4px; 
+            font-size: 16px; 
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            min-height: 44px; /* För touch */
+        }
+        button:active {
+            background: #005a9e;
+        }
+        .info {
+            background: #e3f2fd;
+            border-left-color: #2196f3;
+            color: #1565c0;
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .status.loading { background: #fff3e0; color: #f57c00; }
+        .status.success { background: #e8f5e8; color: #2e7d32; }
+        .status.error { background: #ffebee; color: #c62828; }
+    </style>
+</head>
+<body>
+    <h1>🔧 API Debug Test</h1>
+    <div id="status" class="status loading">Förbereder test...</div>
+    <div id="info"></div>
+    <button onclick="testAPI()" style="background: #4caf50;">🔄 Testa API igen</button>
+    <button onclick="clearLogs()" style="background: #ff9800;">🗑️ Rensa loggar</button>
+    <button onclick="testDirectAPI()" style="background: #9c27b0;">🌐 Testa direkt backend</button>
+    
+    <h2>📋 Test resultat:</h2>
+    <div id="logs"></div>
+
+    <script>
+        function log(message, type = 'log') {
+            const logs = document.getElementById('logs');
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.innerHTML = `<strong>[${new Date().toLocaleTimeString()}]</strong> ${message}`;
+            logs.appendChild(div);
+            logs.scrollTop = logs.scrollHeight; // Auto-scroll
+        }
+
+        function setStatus(message, type = 'loading') {
+            const status = document.getElementById('status');
+            status.className = `status ${type}`;
+            status.textContent = message;
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+            setStatus('Loggar rensade', 'success');
+        }
+
+        // Show current location info
+        function showLocationInfo() {
+            document.getElementById('info').innerHTML = `
+                <div class="log info">
+                    <strong>📍 Nuvarande plats info:</strong><br>
+                    <strong>Host:</strong> ${window.location.hostname}<br>
+                    <strong>Port:</strong> ${window.location.port || 'Standard (80/443)'}<br>
+                    <strong>Protokoll:</strong> ${window.location.protocol}<br>
+                    <strong>Full URL:</strong> ${window.location.href}<br>
+                    <strong>User Agent:</strong> ${navigator.userAgent.substring(0, 100)}...
+                </div>
+            `;
+        }
+
+        // Calculate API URL
+        const currentHost = window.location.hostname;
+        const protocol = window.location.protocol;
+        let apiUrl;
+        
+        if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+            apiUrl = 'http://localhost:8000';
+        } else {
+            apiUrl = `${protocol}//${currentHost}:8000`;
+        }
+
+        async function testDirectAPI() {
+            log('🌐 Testar direkt backend-åtkomst...', 'log');
+            
+            // Test om vi kan komma åt backend direkt
+            const directUrl = `http://192.168.1.228:8000/health`;
+            
+            try {
+                log(`Försöker komma åt: ${directUrl}`, 'log');
+                const response = await fetch(directUrl, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                const data = await response.json();
+                log(`✅ Direkt backend-åtkomst OK!`, 'success');
+                log(`Response: ${JSON.stringify(data, null, 2)}`, 'success');
+            } catch (error) {
+                log(`❌ Direkt backend-åtkomst misslyckades: ${error.message}`, 'error');
+                log(`Error typ: ${error.name}`, 'error');
+            }
+        }
+        async function testAPI() {
+            setStatus('Testar API-anslutning...', 'loading');
+            log('🔍 Startar API-tester...', 'log');
+            log(`Beräknad API URL: ${apiUrl}`, 'info');
+            
+            let successCount = 0;
+            let totalTests = 4;
+            
+            // Test 1: Health check
+            try {
+                log(`Test 1/4: Health check - ${apiUrl}/health`, 'log');
+                const response = await fetch(`${apiUrl}/health`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    cache: 'no-cache'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                log(`✅ Health check lyckades!`, 'success');
+                log(`📄 Data: ${JSON.stringify(data, null, 2)}`, 'success');
+                successCount++;
+            } catch (error) {
+                log(`❌ Health check misslyckades: ${error.message}`, 'error');
+                log(`🔍 Error detaljer: ${error.name} - ${error.stack?.substring(0, 200)}`, 'error');
+            }
+
+            // Test 2: Disks endpoint
+            try {
+                log(`Test 2/4: Disks endpoint - ${apiUrl}/disks`, 'log');
+                const response = await fetch(`${apiUrl}/disks`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    cache: 'no-cache'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                log(`✅ Disks endpoint lyckades! Hittade ${data.length} diskar`, 'success');
+                if (data.length > 0) {
+                    log(`📄 Första disk: ${JSON.stringify(data[0], null, 2)}`, 'success');
+                }
+                successCount++;
+            } catch (error) {
+                log(`❌ Disks endpoint misslyckades: ${error.message}`, 'error');
+            }
+
+            // Test 3: CORS preflight test
+            try {
+                log(`Test 3/4: CORS preflight test`, 'log');
+                const response = await fetch(`${apiUrl}/health`, {
+                    method: 'OPTIONS'
+                });
+                log(`✅ CORS preflight OK: ${response.status}`, 'success');
+                successCount++;
+            } catch (error) {
+                log(`❌ CORS preflight misslyckades: ${error.message}`, 'error');
+            }
+
+            // Test 4: Network connectivity test
+            try {
+                log(`Test 4/4: Basic network test`, 'log');
+                const response = await fetch(`${apiUrl}/`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ Basic network test OK`, 'success');
+                    log(`📄 Root response: ${JSON.stringify(data, null, 2)}`, 'success');
+                    successCount++;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                log(`❌ Basic network test misslyckades: ${error.message}`, 'error');
+            }
+
+            // Final status
+            if (successCount === totalTests) {
+                setStatus(`🎉 Alla tester lyckades! (${successCount}/${totalTests})`, 'success');
+                log(`🎉 SLUTSATS: API fungerar perfekt!`, 'success');
+            } else if (successCount > 0) {
+                setStatus(`⚠️ Delvis fungerande (${successCount}/${totalTests} tester lyckades)`, 'error');
+                log(`⚠️ SLUTSATS: API fungerar delvis. Vissa problem hittades.`, 'error');
+            } else {
+                setStatus(`❌ Alla tester misslyckades (0/${totalTests})`, 'error');
+                log(`❌ SLUTSATS: API fungerar inte alls från denna enhet.`, 'error');
+            }
+        }
+
+        // Auto-run test on load
+        window.addEventListener('load', () => {
+            showLocationInfo();
+            log(`🚀 Debug-sida laddad. Beräknad API URL: ${apiUrl}`, 'info');
+            setTimeout(() => {
+                setStatus('Redo att testa!', 'success');
+                testAPI(); // Auto-kör test
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

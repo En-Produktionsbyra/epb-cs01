@@ -19,6 +19,7 @@ import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbDivider,
+  Card,
 } from '@fluentui/react-components';
 import {
   Storage20Regular,
@@ -26,7 +27,10 @@ import {
   Folder20Regular,
   ArrowLeft20Regular,
   FolderOpen20Regular,
+  Warning20Regular,
+  CheckmarkCircle20Regular,
 } from '@fluentui/react-icons';
+import { browseDirectory } from '../../utils/api';
 
 const useStyles = makeStyles({
   container: {
@@ -63,6 +67,21 @@ const useStyles = makeStyles({
     flex: 1,
     overflow: 'auto',
   },
+  debugCard: {
+    marginBottom: '16px',
+    padding: '12px',
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  debugText: {
+    fontFamily: 'monospace',
+    fontSize: '12px',
+  },
+  errorCard: {
+    marginBottom: '16px',
+    padding: '16px',
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    borderLeft: `4px solid ${tokens.colorPaletteRedForeground1}`,
+  },
 });
 
 const FileExplorer = () => {
@@ -74,6 +93,7 @@ const FileExplorer = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [debugInfo, setDebugInfo] = useState({});
 
   // Extrahera nuvarande sökväg från URL
   const currentPath = location.pathname.includes('/browse/') 
@@ -89,10 +109,18 @@ const FileExplorer = () => {
 
   const fetchDiskInfo = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/disks/${diskId}`);
+      console.log('🔍 Fetching disk info for:', diskId);
+      const response = await fetch(`${window.location.protocol}//${window.location.hostname}:8000/disks/${diskId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      console.log('✅ Disk info loaded:', data);
       setDisk(data);
     } catch (err) {
+      console.error('❌ Failed to fetch disk info:', err);
       setError(`Kunde inte hämta disk info: ${err.message}`);
     }
   };
@@ -101,31 +129,41 @@ const FileExplorer = () => {
     setLoading(true);
     setError('');
     
+    const debug = {
+      diskId,
+      currentPath: currentPath || 'ROOT',
+      timestamp: new Date().toISOString(),
+      frontend: window.location.origin,
+      apiUrl: `${window.location.protocol}//${window.location.hostname}:8000`,
+    };
+    
     try {
-      console.log(`⚡ Ultra-fast fetch for path: "${currentPath}"`);
+      console.log('🗂️ Fetching directory contents:', debug);
       
-      // Använd nya snabba browse-endpoint
-      const params = new URLSearchParams();
-      if (currentPath) {
-        params.append('path', currentPath);
-      }
+      // Använd browseDirectory från api.js
+      const data = await browseDirectory(diskId, currentPath || null);
       
-      const response = await fetch(`http://localhost:8000/disks/${diskId}/browse?${params}`);
+      console.log('✅ Directory contents loaded:', data);
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      console.log(`⚡ Got ${data.items?.length || 0} items instantly!`);
+      debug.success = true;
+      debug.itemCount = data.items?.length || 0;
+      debug.directoryCount = data.directory_count;
+      debug.fileCount = data.file_count;
       
       setItems(data.items || []);
       
     } catch (err) {
+      console.error('❌ Failed to fetch directory contents:', err);
+      
+      debug.success = false;
+      debug.error = err.message;
+      debug.errorType = err.name;
+      
       setError(`Kunde inte hämta kataloginnehåll: ${err.message}`);
       setItems([]);
     }
     
+    setDebugInfo(debug);
     setLoading(false);
   };
 
@@ -255,27 +293,53 @@ const FileExplorer = () => {
     );
   }
 
-  if (error) {
-    return (
-      <div style={{ textAlign: 'center', padding: '32px' }}>
-        <Text style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>
-        <br />
-        <Button 
-          appearance="primary" 
-          onClick={fetchDirectoryContents}
-          style={{ marginTop: '16px' }}
-        >
-          Försök igen
-        </Button>
-      </div>
-    );
-  }
-
   const folders = items.filter(item => item.type === 'folder');
   const files = items.filter(item => item.type === 'file');
 
   return (
     <div className={styles.container}>
+      {/* Debug Information */}
+      {process.env.NODE_ENV === 'development' && (
+        <Card className={styles.debugCard}>
+          <Text size={300} weight="semibold" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {debugInfo.success ? (
+              <CheckmarkCircle20Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
+            ) : (
+              <Warning20Regular style={{ color: tokens.colorPaletteRedForeground1 }} />
+            )}
+            Debug Info
+          </Text>
+          <div className={styles.debugText}>
+            API URL: {debugInfo.apiUrl}<br/>
+            Disk ID: {debugInfo.diskId}<br/>
+            Path: {debugInfo.currentPath}<br/>
+            Success: {debugInfo.success ? 'Yes' : 'No'}<br/>
+            Items: {debugInfo.itemCount} ({debugInfo.directoryCount} dirs, {debugInfo.fileCount} files)<br/>
+            {debugInfo.error && `Error: ${debugInfo.error}`}
+          </div>
+        </Card>
+      )}
+
+      {/* Error Card */}
+      {error && (
+        <Card className={styles.errorCard}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Warning20Regular style={{ color: tokens.colorPaletteRedForeground1 }} />
+            <Text weight="semibold" style={{ color: tokens.colorPaletteRedForeground1 }}>
+              Anslutningsfel
+            </Text>
+          </div>
+          <Text style={{ marginTop: '8px' }}>{error}</Text>
+          <Button 
+            appearance="primary" 
+            onClick={fetchDirectoryContents}
+            style={{ marginTop: '12px' }}
+          >
+            Försök igen
+          </Button>
+        </Card>
+      )}
+
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.breadcrumbContainer}>
@@ -321,7 +385,7 @@ const FileExplorer = () => {
 
       {/* File/Folder Grid */}
       <div className={styles.content}>
-        {items.length === 0 ? (
+        {items.length === 0 && !error ? (
           <div style={{ textAlign: 'center', padding: '60px' }}>
             <FolderOpen20Regular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3, marginBottom: '16px' }} />
             <Text>Mappen är tom</Text>

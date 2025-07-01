@@ -63,6 +63,152 @@ def extract_all_files_with_paths(tree_node, root_path, current_relative_path="")
     
     return files
 
+def populate_directories_for_disk(cursor, disk_id):
+    """Populera directories för en specifik disk baserat på files-tabellen"""
+    
+    # Hämta alla unika directory paths för denna disk
+    cursor.execute("""
+        SELECT DISTINCT file_path 
+        FROM files 
+        WHERE disk_id = ? AND file_path IS NOT NULL AND file_path != ''
+        ORDER BY file_path
+    """, (disk_id,))
+    
+    file_paths = [row[0] for row in cursor.fetchall()]
+    
+    # Bygg directory-hierarki
+    directories = set()
+    
+    for file_path in file_paths:
+        # Lägg till alla delar av sökvägen
+        parts = file_path.split('/')
+        current_path = ""
+        
+        for i, part in enumerate(parts):
+            if current_path:
+                current_path += "/" + part
+            else:
+                current_path = part
+            
+            parent_path = "/".join(parts[:i]) if i > 0 else None
+            depth = i
+            
+            directories.add((current_path, part, parent_path, depth))
+    
+    # Spara directories i databasen
+    directories_created = 0
+    for directory_path, directory_name, parent_path, depth_level in directories:
+        
+        # Räkna filer direkt i denna mapp
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM files 
+            WHERE disk_id = ? AND file_path = ?
+        """, (disk_id, directory_path))
+        file_count = cursor.fetchone()[0]
+        
+        # Räkna undermappar
+        cursor.execute("""
+            SELECT COUNT(DISTINCT SUBSTR(file_path, LENGTH(?) + 2, 
+                   CASE WHEN INSTR(SUBSTR(file_path, LENGTH(?) + 2), '/') > 0 
+                        THEN INSTR(SUBSTR(file_path, LENGTH(?) + 2), '/') - 1
+                        ELSE LENGTH(SUBSTR(file_path, LENGTH(?) + 2))
+                   END))
+            FROM files 
+            WHERE disk_id = ? AND file_path LIKE ? AND file_path != ?
+        """, (directory_path, directory_path, directory_path, directory_path, 
+              disk_id, f"{directory_path}/%", directory_path))
+        subdirectory_count = cursor.fetchone()[0]
+        
+        # Lägg till directory
+        cursor.execute("""
+            INSERT OR REPLACE INTO directories 
+            (disk_id, directory_path, directory_name, parent_path, depth_level, file_count, subdirectory_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (disk_id, directory_path, directory_name, parent_path, depth_level, file_count, subdirectory_count))
+        
+        directories_created += 1
+    
+    return directories_created
+
+async def browse_directory_fallback(cursor, disk_id: str, path: Optional[str]):
+    """Fallback-metod som använder files-tabellen för att bygga directory-view"""
+    
+    print(f"🔄 Fallback browse for path: '{path or 'ROOT'}'")
+    
+    # Hämta alla filer från disken
+    cursor.execute("""
+        SELECT filename, file_path, file_size, file_type, modified_date, client, project
+        FROM files 
+        WHERE disk_id = ?
+        ORDER BY file_path, filename
+    """, (disk_id,))
+    
+    all_files = cursor.fetchall()
+    
+    # Organisera items för nuvarande path
+    items = []
+    folders = set()
+    
+    current_path = path or ""
+    
+    for row in all_files:
+        filename, file_path, file_size, file_type, modified_date, client, project = row
+        file_path = file_path or ""  # Hantera NULL values
+        
+        if current_path == "":
+            # Vi är i root - visa toppnivå mappar och filer
+            if file_path == "":
+                # Fil i root
+                items.append({
+                    "filename": filename,
+                    "type": "file",
+                    "file_size": file_size,
+                    "file_type": file_type,
+                    "modified_date": modified_date,
+                    "client": client,
+                    "project": project
+                })
+            else:
+                # Fil i mapp - extrahera första mapp-nivån
+                first_folder = file_path.split('/')[0]
+                if first_folder:
+                    folders.add(first_folder)
+        else:
+            # Vi är i en specifik mapp
+            if file_path == current_path:
+                # Fil direkt i denna mapp
+                items.append({
+                    "filename": filename,
+                    "type": "file",
+                    "file_size": file_size,
+                    "file_type": file_type,
+                    "modified_date": modified_date,
+                    "client": client,
+                    "project": project
+                })
+            elif file_path.startswith(current_path + "/"):
+                # Fil i undermapp till denna mapp
+                relative_path = file_path[len(current_path) + 1:]
+                next_folder = relative_path.split('/')[0]
+                if next_folder:
+                    folders.add(next_folder)
+    
+    # Lägg till mappar först
+    for folder_name in sorted(folders):
+        items.insert(0, {
+            "filename": folder_name,
+            "type": "folder",
+            "file_size": None,
+            "file_count": 0,  # Vi beräknar inte detta i fallback
+            "subdirectory_count": 0,
+            "path": f"{current_path}/{folder_name}" if current_path else folder_name
+        })
+    
+    print(f"🔄 Fallback result: {len(folders)} folders, {len(items) - len(folders)} files")
+    
+    return items
+
 def init_database(db_path: str):
     """Initialize the database with required tables"""
     import sqlite3
@@ -172,11 +318,19 @@ app = FastAPI(
 # CORS för React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://127.0.0.1:3000",
+        "http://0.0.0.0:3000",
+        "http://192.168.1.228:3000",  # Din specifika IP
+        "http://192.168.1.*:3000",   # Alla IP på ditt nätverk
+        "*"  # Eller helt öppet för development
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Databas
 db_manager = DatabaseManager(DB_PATH)
@@ -473,43 +627,63 @@ async def browse_directory(
     try:
         print(f"🗂️ Browse: disk={disk_id}, path='{path or 'ROOT'}'")
         
-        # Parallella anrop för mappar och filer
-        directories_response = await get_disk_directories(disk_id, path)
-        files_response = await get_files_in_directory(disk_id, path)
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
         
-        # Kombinera resultat
-        items = []
+        # Kontrollera först om vi har data i directories-tabellen
+        cursor.execute("SELECT COUNT(*) FROM directories WHERE disk_id = ?", (disk_id,))
+        directory_count = cursor.fetchone()[0]
         
-        # Lägg till mappar först
-        for directory in directories_response["directories"]:
-            items.append({
-                "filename": directory["name"],
-                "type": "folder",
-                "file_size": None,
-                "file_count": directory["file_count"],
-                "subdirectory_count": directory["subdirectory_count"],
-                "path": directory["path"]
-            })
+        if directory_count > 0:
+            print(f"📁 Using fast directories table ({directory_count} dirs)")
+            # Använd den snabba directories-metoden
+            directories_response = await get_disk_directories(disk_id, path)
+            files_response = await get_files_in_directory(disk_id, path)
+            
+            # Kombinera resultat
+            items = []
+            
+            # Lägg till mappar först
+            for directory in directories_response["directories"]:
+                items.append({
+                    "filename": directory["name"],
+                    "type": "folder",
+                    "file_size": None,
+                    "file_count": directory["file_count"],
+                    "subdirectory_count": directory["subdirectory_count"],
+                    "path": directory["path"]
+                })
+            
+            # Lägg till filer
+            for file in files_response["files"]:
+                items.append({
+                    "filename": file["filename"],
+                    "type": "file", 
+                    "file_size": file["file_size"],
+                    "file_type": file["file_type"],
+                    "modified_date": file["modified_date"],
+                    "client": file["client"],
+                    "project": file["project"]
+                })
+            
+            print(f"⚡ Fast browse result: {len(directories_response['directories'])} dirs + {len(files_response['files'])} files")
+            
+        else:
+            print(f"📄 Using fallback files table method")
+            # Fallback: Använd gamla metoden med files-tabellen
+            items = await browse_directory_fallback(cursor, disk_id, path)
         
-        # Lägg till filer
-        for file in files_response["files"]:
-            items.append({
-                "filename": file["filename"],
-                "type": "file", 
-                "file_size": file["file_size"],
-                "file_type": file["file_type"],
-                "modified_date": file["modified_date"],
-                "client": file["client"],
-                "project": file["project"]
-            })
+        conn.close()
         
-        print(f"⚡ Browse result: {len(directories_response['directories'])} dirs + {len(files_response['files'])} files")
+        # Räkna folder vs files
+        folders = [item for item in items if item["type"] == "folder"]
+        files = [item for item in items if item["type"] == "file"]
         
         return {
             "items": items,
             "path": path,
-            "directory_count": len(directories_response["directories"]),
-            "file_count": len(files_response["files"])
+            "directory_count": len(folders),
+            "file_count": len(files)
         }
         
     except Exception as e:
@@ -538,50 +712,42 @@ async def upload_json_index(file: UploadFile = File(...)):
         tree = data['tree']
         statistics = data.get('statistics', {})
         
-        # Skapa disk_id från root path och datum
-        root_path = scan_info.get('root_path', '')
-        scan_date = scan_info.get('scan_date', '')
-        
-        # Generera disk_id (t.ex. "HD_2025_20250623")
-        year = None
-        if root_path:
-            year_match = re.search(r'/(\d{4})(?:/|$)', root_path)
-            if year_match:
-                year = year_match.group(1)
-        
-        if not year and scan_date:
-            try:
-                dt = datetime.fromisoformat(scan_date.replace('Z', '+00:00'))
-                year = str(dt.year)
-            except:
-                year = "UNKN"
-        
-        # Skapa disk_id
-        date_part = scan_date[:10].replace('-', '') if scan_date else "00000000"
-        disk_id = f"HD_{year}_{date_part}"
+        # NYTT: Använd filnamnet som bas för disk_id
+        base_filename = file.filename.replace('.json', '')
+        # Rensa ogiltiga tecken för disk_id
+        safe_disk_id = re.sub(r'[^\w\-_]', '_', base_filename)
         
         # Kontrollera om disk redan finns
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (disk_id,))
+        cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (safe_disk_id,))
         if cursor.fetchone():
             # Lägg till suffix om den redan finns
             counter = 1
             while True:
-                new_disk_id = f"{disk_id}_{counter}"
+                new_disk_id = f"{safe_disk_id}_{counter}"
                 cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (new_disk_id,))
                 if not cursor.fetchone():
-                    disk_id = new_disk_id
+                    safe_disk_id = new_disk_id
                     break
                 counter += 1
         
-        # Skapa disk-namn från root path
-        disk_name = root_path.split('/')[-1] if root_path else f"Disk {disk_id}"
+        disk_id = safe_disk_id
+        
+        # Skapa disk-namn från filnamnet eller root path som fallback
+        disk_name = base_filename
+        if not disk_name.strip():
+            # Fallback till root path om filnamnet är tomt
+            root_path = scan_info.get('root_path', '')
+            disk_name = root_path.split('/')[-1] if root_path else f"Disk {disk_id}"
+        
+        # Beräkna statistik
         total_size = sum(f.get('size', 0) for f in extract_all_files(tree))
         total_files = statistics.get('total_files', 0)
+        scan_date = scan_info.get('scan_date', '')
         
-        print(f"💿 Creating disk: {disk_id} ({disk_name})")
+        print(f"💿 Creating disk: {disk_id} ({disk_name}) from file: {file.filename}")
         
         # Lägg till disk i databasen
         cursor.execute('''
@@ -601,7 +767,7 @@ async def upload_json_index(file: UploadFile = File(...)):
         
         # Extrahera och importera alla filer
         files_imported = 0
-        all_files = extract_all_files_with_paths(tree, root_path)
+        all_files = extract_all_files_with_paths(tree, scan_info.get('root_path', ''))
         
         print(f"📄 Importing {len(all_files)} files...")
         
@@ -633,16 +799,22 @@ async def upload_json_index(file: UploadFile = File(...)):
                 print(f"⚠️ Error importing file {file_info['filename']}: {e}")
                 continue
         
+        # NYT: Populera directories-tabellen
+        print(f"📁 Building directories structure...")
+        directories_created = populate_directories_for_disk(cursor, disk_id)
+        print(f"✅ Created {directories_created} directory entries")
+        
         conn.commit()
         conn.close()
         
-        print(f"✅ Import complete: {files_imported} files imported")
+        print(f"✅ Import complete: {files_imported} files imported, {directories_created} directories created")
         
         return {
             "success": True,
             "disk_id": disk_id,
             "disk_name": disk_name,
             "files_imported": files_imported,
+            "directories_created": directories_created,
             "total_files": total_files,
             "total_size": total_size,
             "message": f"Hårddisk {disk_id} importerad framgångsrikt"
@@ -655,10 +827,115 @@ async def upload_json_index(file: UploadFile = File(...)):
         print(f"❌ Import error: {e}")
         raise HTTPException(status_code=500, detail=f"Import-fel: {str(e)}")
 
+# DEBUG ENDPOINTS
+
+@app.get("/debug/disk/{disk_id}")
+async def debug_disk_data(disk_id: str):
+    """Debug-endpoint för att se disk-data"""
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        
+        # Disk info
+        cursor.execute("SELECT * FROM disks WHERE disk_id = ?", (disk_id,))
+        disk_info = cursor.fetchone()
+        
+        # Files count och sample
+        cursor.execute("SELECT COUNT(*) FROM files WHERE disk_id = ?", (disk_id,))
+        files_count = cursor.fetchone()[0]
+        
+        cursor.execute("""
+            SELECT filename, file_path, file_size 
+            FROM files 
+            WHERE disk_id = ? 
+            ORDER BY file_path, filename 
+            LIMIT 10
+        """, (disk_id,))
+        sample_files = cursor.fetchall()
+        
+        # Directories count och sample
+        cursor.execute("SELECT COUNT(*) FROM directories WHERE disk_id = ?", (disk_id,))
+        directories_count = cursor.fetchone()[0]
+        
+        cursor.execute("""
+            SELECT directory_path, directory_name, parent_path, depth_level, file_count 
+            FROM directories 
+            WHERE disk_id = ? 
+            ORDER BY depth_level, directory_path 
+            LIMIT 10
+        """, (disk_id,))
+        sample_directories = cursor.fetchall()
+        
+        # Unique file paths för analys
+        cursor.execute("""
+            SELECT DISTINCT file_path 
+            FROM files 
+            WHERE disk_id = ? AND file_path IS NOT NULL AND file_path != ''
+            ORDER BY file_path 
+            LIMIT 20
+        """, (disk_id,))
+        unique_paths = [row[0] for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return {
+            "disk_id": disk_id,
+            "disk_info": disk_info,
+            "files_count": files_count,
+            "directories_count": directories_count,
+            "sample_files": [
+                {"filename": f[0], "file_path": f[1], "file_size": f[2]} 
+                for f in sample_files
+            ],
+            "sample_directories": [
+                {
+                    "directory_path": d[0],
+                    "directory_name": d[1], 
+                    "parent_path": d[2],
+                    "depth_level": d[3],
+                    "file_count": d[4]
+                }
+                for d in sample_directories
+            ],
+            "unique_file_paths": unique_paths
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/debug/populate-directories/{disk_id}")
+async def debug_populate_directories(disk_id: str):
+    """Debug-endpoint för att manuellt populera directories för en disk"""
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        
+        # Kontrollera att disk finns
+        cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (disk_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Disk not found")
+        
+        # Rensa befintliga directories
+        cursor.execute("DELETE FROM directories WHERE disk_id = ?", (disk_id,))
+        
+        # Populera på nytt
+        directories_created = populate_directories_for_disk(cursor, disk_id)
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "success": True,
+            "disk_id": disk_id,
+            "directories_created": directories_created,
+            "message": f"Populated {directories_created} directories for disk {disk_id}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting Cold Storage API...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-    

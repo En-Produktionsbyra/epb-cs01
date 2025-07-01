@@ -29,6 +29,7 @@ import {
   Person20Regular,
   FolderOpen20Regular,
 } from '@fluentui/react-icons';
+import { searchFiles, fetchDisks } from '../../utils/api';
 
 const useStyles = makeStyles({
   container: {
@@ -121,7 +122,7 @@ const Search = () => {
 
   // Hämta diskar för filter
   useEffect(() => {
-    fetchDisks();
+    loadDisks(); // Istället för fetchDisks
   }, []);
 
   // Synka URL med state
@@ -137,11 +138,11 @@ const Search = () => {
 
   const fetchDisks = async () => {
     try {
-      const response = await fetch('http://localhost:8000/disks');
-      const data = await response.json();
+      const data = await fetchDisks(); 
       setDisks(data || []);
     } catch (err) {
       console.error('Kunde inte hämta diskar:', err);
+      setDisks([]);
     }
   };
 
@@ -156,22 +157,14 @@ const Search = () => {
     setHasSearched(true);
 
     try {
-      const params = new URLSearchParams({
+      const data = await searchFiles({
         q: searchQuery.trim(),
-        per_page: '200'
+        per_page: 200,
+        client: clientFilter || null,
+        project: projectFilter || null,
+        disk_id: diskFilter || null
       });
-
-      if (clientFilter) params.append('client', clientFilter);
-      if (projectFilter) params.append('project', projectFilter);
-      if (diskFilter) params.append('disk_id', diskFilter);
-
-      const response = await fetch(`http://localhost:8000/search?${params}`);
       
-      if (!response.ok) {
-        throw new Error(`Sökfel: ${response.status}`);
-      }
-
-      const data = await response.json();
       setResults(data.files || []);
     } catch (err) {
       setError(err.message);

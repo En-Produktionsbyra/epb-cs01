@@ -3,41 +3,32 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./backend  # ← DETTA var problemet!
+      context: ./backend
       dockerfile: Dockerfile
     container_name: cold-storage-backend
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"  # VIKTIGT: Lyssna på alla interfaces
     volumes:
       - ./data:/app/data
-      - /Volumes:/app/disks:ro  # Dina macOS volymer
+      - /Volumes:/app/disks:ro
     environment:
       - DB_PATH=/app/data/cold_storage.db
       - PYTHONPATH=/app
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   frontend:
     build:
-      context: ./frontend  # ← Och detta
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: cold-storage-frontend
     ports:
-      - "3000:3000"
+      - "0.0.0.0:3000:3000"  # VIKTIGT: Lyssna på alla interfaces
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      # INGEN statisk API URL - låt JavaScript detektera automatiskt
       - CHOKIDAR_USEPOLLING=true
     volumes:
-      - ./frontend/src:/app/src  # Hot reload
+      - ./frontend/src:/app/src
       - ./frontend/public:/app/public
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  cold_storage_data:
-    driver: locale

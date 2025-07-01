@@ -20,6 +20,7 @@ import {
   ArrowClockwise20Regular,
   ChevronRight20Regular,
 } from '@fluentui/react-icons';
+import { fetchDisks as getDisks } from '../../utils/api';
 
 const useStyles = makeStyles({
   header: {
@@ -102,15 +103,17 @@ const Dashboard = () => {
     fetchDisks();
   }, []);
 
+
+  // Sedan ändra funktionen:
   const fetchDisks = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/disks');
-      const data = await response.json();
-      setDisks(data);
+      const data = await getDisks(); // Använd din smarta API-funktion
+      setDisks(data || []);
       setError('');
     } catch (err) {
       setError(err.message);
+      setDisks([]); // Sätt alltid till tom array vid fel
     }
     setLoading(false);
   };
