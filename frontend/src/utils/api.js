@@ -2,20 +2,11 @@ import axios from 'axios';
 
 // FIXAD VERSION - garanterat rätt API URL
 const getApiBaseUrl = () => {
-  // Kontrollera environment variable först
-  // if (process.env.REACT_APP_API_URL) {
-  //   console.log('🔧 Using REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
-  //   return process.env.REACT_APP_API_URL;
-  // }
-  
-  // Automatisk detektering baserat på var frontend körs från
   const currentHost = window.location.hostname;
-  const currentPort = window.location.port;
   const protocol = window.location.protocol;
   
   console.log('🌐 Current location:', {
     hostname: currentHost,
-    port: currentPort,
     protocol: protocol,
     full: window.location.href
   });
@@ -23,10 +14,11 @@ const getApiBaseUrl = () => {
   let apiUrl;
   
   if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+    // Development - direkt till port 8000
     apiUrl = 'http://localhost:8000';
   } else {
-    // Använd samma host som frontend men port 8000
-    apiUrl = `${protocol}//${currentHost}:8000`;
+    // Production - använd /api/ path
+    apiUrl = `${protocol}//${currentHost}/api`;
   }
   
   console.log('🔗 Calculated API URL:', apiUrl);
