@@ -31,13 +31,13 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Build and push backend Docker image
 echo "🔨 Building and pushing backend Docker image..."
-docker build -t cold-storage-backend ./backend
+docker build --platform linux/amd64 -t cold-storage-backend ./backend
 docker tag cold-storage-backend ghcr.io/en-produktionsbyra/cold-storage:backend-$TIMESTAMP
 docker tag cold-storage-backend ghcr.io/en-produktionsbyra/cold-storage:backend-latest
 
 # Build and push frontend Docker image
 echo "🔨 Building and pushing frontend Docker image..."
-docker build -f frontend/Dockerfile.prod -t cold-storage-frontend ./frontend
+docker build --platform linux/amd64 -f frontend/Dockerfile.prod -t cold-storage-frontend ./frontend
 docker tag cold-storage-frontend ghcr.io/en-produktionsbyra/cold-storage:frontend-$TIMESTAMP
 docker tag cold-storage-frontend ghcr.io/en-produktionsbyra/cold-storage:frontend-latest
 
