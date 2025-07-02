@@ -1,108 +1,103 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import {
-  Text,
   Button,
+  Text,
   Card,
   Badge,
-  Spinner,
   ProgressBar,
   Dialog,
   DialogTrigger,
   DialogSurface,
+  DialogBody,
   DialogTitle,
   DialogContent,
-  DialogBody,
   DialogActions,
   MessageBar,
-  MessageBarTitle,
   MessageBarBody,
+  MessageBarTitle,
+  Spinner,
   tokens
 } from '@fluentui/react-components';
 import {
   CloudArrowUp20Regular,
   Document20Regular,
-  Checkmark20Regular,
-  Dismiss20Regular,
-  Warning20Regular,
+  Storage20Regular,
   CalendarLtr20Regular,
-  Storage20Regular
+  Dismiss20Regular
 } from '@fluentui/react-icons';
-
-// Import API functions
-import { 
-  checkDuplicate,
-  uploadDiskPackageAsync, 
-  connectToProgressStream 
-} from '../../utils/api';
+import { uploadDiskPackageAsync, connectToProgressStream, checkDuplicate } from '../../utils/api';
 
 const Upload = () => {
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false); // NY STATE
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
   const [uploadDetails, setUploadDetails] = useState('');
   const [results, setResults] = useState([]);
   const [eventSource, setEventSource] = useState(null);
-
-  // Duplicate check state
+  
+  // Duplicate dialog states
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState(null);
   const [fileToUpload, setFileToUpload] = useState(null);
 
-  const handleDragOver = useCallback((e) => {
+  const handleDragOver = (e) => {
     e.preventDefault();
     setDragOver(true);
-  }, []);
+  };
 
-  const handleDragLeave = useCallback((e) => {
+  const handleDragLeave = (e) => {
     e.preventDefault();
     setDragOver(false);
-  }, []);
+  };
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    
     const droppedFiles = Array.from(e.dataTransfer.files);
-    handleFiles(droppedFiles);
-  }, []);
-
-  const handleFileSelect = useCallback((e) => {
-    const selectedFiles = Array.from(e.target.files);
-    handleFiles(selectedFiles);
-  }, []);
-
-  const handleFiles = (fileList) => {
-    // Filtrera bara JSON-filer
-    const jsonFiles = fileList.filter(file => 
-      file.name.toLowerCase().endsWith('.json') || 
-      file.type === 'application/json'
+    const jsonFiles = droppedFiles.filter(file => 
+      file.name.toLowerCase().endsWith('.json') || file.type === 'application/json'
     );
-
+    
     if (jsonFiles.length === 0) {
       alert('Endast JSON-filer accepteras');
       return;
     }
+    
+    setFiles(jsonFiles);
+  };
 
+  const handleFileSelect = (e) => {
+    const selectedFiles = Array.from(e.target.files);
+    const jsonFiles = selectedFiles.filter(file => 
+      file.name.toLowerCase().endsWith('.json') || file.type === 'application/json'
+    );
+    
+    if (jsonFiles.length === 0) {
+      alert('Endast JSON-filer accepteras');
+      return;
+    }
+    
     setFiles(jsonFiles);
   };
 
   const checkForDuplicates = async (file) => {
+    setCheckingDuplicate(true); // STARTA LOADING
+    
     try {
-      console.log('🔍 Checking for duplicates...');
       const duplicateResult = await checkDuplicate(file);
       
       if (duplicateResult.duplicate_found) {
-        console.log('⚠️ Duplicate found:', duplicateResult);
+        // Duplicate found, show dialog
         setDuplicateInfo(duplicateResult);
         setFileToUpload(file);
         setDuplicateDialogOpen(true);
-        return true; // Duplicate found, stop upload
-      } else {
-        console.log('✅ No duplicate found, proceeding with upload');
-        return false; // No duplicate, proceed with upload
+        return true; // Stop upload process
       }
+      
+      return false; // No duplicate, continue with upload
     } catch (error) {
       console.error('❌ Duplicate check failed:', error);
       // If duplicate check fails, ask user what to do
@@ -110,11 +105,13 @@ const Upload = () => {
         `Kunde inte kontrollera om filen redan finns: ${error.message}\n\nVill du fortsätta med upload ändå?`
       );
       return !proceed; // Return true to stop upload if user says no
+    } finally {
+      setCheckingDuplicate(false); // STOPPA LOADING
     }
   };
 
   const startUpload = async (file, replaceExisting = false) => {
-    console.log('🚀 Starting upload process...');
+    console.log('🚀 Starting upload process...', 'Replace existing:', replaceExisting);
     
     setUploading(true);
     setUploadProgress(0);
@@ -123,8 +120,8 @@ const Upload = () => {
     setResults([]);
 
     try {
-      // Start async upload
-      const uploadResult = await uploadDiskPackageAsync(file);
+      // Start async upload MED replaceExisting parameter
+      const uploadResult = await uploadDiskPackageAsync(file, replaceExisting);
       console.log('📤 Upload started:', uploadResult);
       
       if (!uploadResult.task_id) {
@@ -145,10 +142,16 @@ const Upload = () => {
           setUploadProgress(100);
           setUploadStatus('Upload slutförd!');
           setUploadDetails(`${result.files_imported} filer importerade`);
+          
+          // Uppdaterat meddelande för ersättning
+          const message = replaceExisting 
+            ? `Befintlig disk ersatt: ${result.disk_name}`
+            : `Framgångsrikt importerad: ${result.disk_name}`;
+            
           setResults([{
             file: file.name,
             status: 'success',
-            message: `Framgångsrikt importerad: ${result.disk_name}`,
+            message: message,
             data: result
           }]);
           setUploading(false);
@@ -194,7 +197,7 @@ const Upload = () => {
     
     const file = files[0]; // For now, handle one file at a time
     
-    // Check for duplicates first
+    // Check for duplicates first (med loading state)
     const duplicateFound = await checkForDuplicates(file);
     
     if (!duplicateFound) {
@@ -263,6 +266,8 @@ const Upload = () => {
     }
   };
 
+  const isProcessing = uploading || checkingDuplicate;
+
   return (
     <div style={{ padding: '24px', maxWidth: '800px', margin: '0 auto' }}>
       {/* Header */}
@@ -281,16 +286,21 @@ const Upload = () => {
           borderRadius: tokens.borderRadiusMedium,
           padding: '48px 24px',
           textAlign: 'center',
-          cursor: 'pointer',
+          cursor: isProcessing ? 'not-allowed' : 'pointer',
           backgroundColor: dragOver ? tokens.colorBrandBackground2 : tokens.colorNeutralBackground1,
-          marginBottom: '24px'
+          marginBottom: '24px',
+          opacity: isProcessing ? 0.6 : 1
         }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => document.getElementById('fileInput').click()}
+        onDragOver={isProcessing ? undefined : handleDragOver}
+        onDragLeave={isProcessing ? undefined : handleDragLeave}
+        onDrop={isProcessing ? undefined : handleDrop}
+        onClick={isProcessing ? undefined : () => document.getElementById('fileInput').click()}
       >
-        <CloudArrowUp20Regular style={{ fontSize: '48px', marginBottom: '16px', color: tokens.colorBrandForeground1 }} />
+        <CloudArrowUp20Regular style={{ 
+          fontSize: '48px', 
+          marginBottom: '16px', 
+          color: tokens.colorBrandForeground1 
+        }} />
         <Text size={500} weight="semibold" block style={{ marginBottom: '8px' }}>
           Dra och släpp JSON-filer här
         </Text>
@@ -307,6 +317,7 @@ const Upload = () => {
         accept=".json,application/json"
         style={{ display: 'none' }}
         onChange={handleFileSelect}
+        disabled={isProcessing}
       />
 
       {/* Selected Files */}
@@ -329,10 +340,11 @@ const Upload = () => {
             <Button
               appearance="primary"
               onClick={uploadFiles}
-              disabled={uploading}
+              disabled={isProcessing}
               style={{ marginRight: '8px' }}
+              icon={checkingDuplicate ? <Spinner size="tiny" /> : undefined}
             >
-              {uploading ? 'Laddar upp...' : 'Starta upload'}
+              {checkingDuplicate ? 'Kontrollerar...' : (uploading ? 'Laddar upp...' : 'Ladda upp')}
             </Button>
             
             {uploading && (
@@ -347,68 +359,80 @@ const Upload = () => {
         </Card>
       )}
 
+      {/* Loading State för Duplicate Check */}
+      {checkingDuplicate && (
+        <Card style={{ marginBottom: '24px', padding: '16px', textAlign: 'center' }}>
+          <Spinner size="medium" style={{ marginBottom: '12px' }} />
+          <Text weight="semibold" block style={{ marginBottom: '8px' }}>
+            Kontrollerar duplicat...
+          </Text>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            Söker efter befintlig disk med samma namn
+          </Text>
+        </Card>
+      )}
+
       {/* Upload Progress */}
       {uploading && (
         <Card style={{ marginBottom: '24px', padding: '16px' }}>
-          <Text weight="semibold" block style={{ marginBottom: '8px' }}>
-            {uploadStatus}
-          </Text>
-          <ProgressBar value={uploadProgress / 100} style={{ marginBottom: '8px' }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <Text size={200}>{uploadDetails}</Text>
-            <Text size={200}>{Math.round(uploadProgress)}%</Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            <Spinner size="small" />
+            <Text weight="semibold">{uploadStatus}</Text>
           </div>
+          
+          <ProgressBar value={uploadProgress} max={100} style={{ marginBottom: '8px' }} />
+          
+          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+            {uploadDetails}
+          </Text>
         </Card>
       )}
 
       {/* Results */}
       {results.length > 0 && (
-        <Card style={{ padding: '16px' }}>
+        <Card style={{ marginBottom: '24px', padding: '16px' }}>
           <Text weight="semibold" block style={{ marginBottom: '12px' }}>
             Resultat:
           </Text>
           {results.map((result, index) => (
-            <MessageBar
-              key={index}
-              intent={result.status === 'success' ? 'success' : 'error'}
-              style={{ marginBottom: '8px' }}
-            >
-              <MessageBarBody>
-                <MessageBarTitle>
-                  {result.status === 'success' ? (
-                    <Checkmark20Regular style={{ marginRight: '4px' }} />
-                  ) : (
-                    <Dismiss20Regular style={{ marginRight: '4px' }} />
-                  )}
-                  {result.file}
-                </MessageBarTitle>
+            <div key={index} style={{ 
+              padding: '12px', 
+              borderRadius: tokens.borderRadiusMedium,
+              backgroundColor: result.status === 'success' 
+                ? tokens.colorPaletteGreenBackground1 
+                : tokens.colorPaletteRedBackground1,
+              marginBottom: '8px'
+            }}>
+              <Text weight="semibold" style={{ 
+                color: result.status === 'success' 
+                  ? tokens.colorPaletteGreenForeground1 
+                  : tokens.colorPaletteRedForeground1 
+              }}>
+                {result.status === 'success' ? '✅' : '❌'} {result.file}
+              </Text>
+              <Text block style={{ marginTop: '4px' }}>
                 {result.message}
-                {result.data && (
-                  <div style={{ marginTop: '8px', fontSize: '12px' }}>
-                    {result.data.files_imported} filer, {result.data.directories_created} mappar, {result.data.total_size_mb} MB
-                  </div>
-                )}
-              </MessageBarBody>
-            </MessageBar>
+              </Text>
+            </div>
           ))}
         </Card>
       )}
 
-      {/* Duplicate Check Dialog */}
+      {/* Duplicate Dialog */}
       <Dialog open={duplicateDialogOpen} onOpenChange={(event, data) => setDuplicateDialogOpen(data.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Warning20Regular style={{ color: tokens.colorPaletteYellowForeground1 }} />
-                Hårddisk finns redan
+                <Storage20Regular style={{ color: tokens.colorPaletteRedForeground1 }} />
+                Disk finns redan
               </div>
             </DialogTitle>
             <DialogContent>
               {duplicateInfo && (
                 <div>
                   <Text block style={{ marginBottom: '16px' }}>
-                    En hårddisk med namnet <strong>"{duplicateInfo.existing_disk.name}"</strong> har redan laddats upp.
+                    En hårddisk med samma namn finns redan:
                   </Text>
                   
                   <Card style={{ padding: '12px', marginBottom: '16px', backgroundColor: tokens.colorNeutralBackground2 }}>
@@ -450,8 +474,8 @@ const Upload = () => {
                 appearance="primary"
                 onClick={handleDuplicateReplace}
                 style={{ 
-                  backgroundColor: tokens.colorPaletteYellowBackground3,
-                  borderColor: tokens.colorPaletteYellowBorder2
+                  backgroundColor: tokens.colorPaletteRedBackground3,
+                  borderColor: tokens.colorPaletteRedBorder2
                 }}
               >
                 Ersätt befintlig

@@ -270,24 +270,29 @@ export const uploadDiskPackage = async (file, onUploadProgress = null) => {
 };
 
 /**
- * Ladda upp hårddisk-paket - NY ASYNKRONA METODEN MED PROGRESS
+ * Ladda upp hårddisk-paket - NY ASYNKRONA METODEN MED PROGRESS OCH REPLACE
  */
-export const uploadDiskPackageAsync = async (file) => {
+export const uploadDiskPackageAsync = async (file, replaceExisting = false) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
     
-    console.log('📤 Starting async upload:', file.name);
+    // VIKTIGT: Lägg till replace_existing som form parameter
+    if (replaceExisting) {
+      formData.append('replace_existing', 'true');
+    }
+    
+    console.log('📤 Uploading file (async):', file.name, 'Replace existing:', replaceExisting);
     const response = await api.post('/upload/json-index-async', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
     
-    console.log('✅ Async upload started:', response.data);
+    console.log('✅ Upload started:', response.data);
     return response.data;
   } catch (error) {
-    console.error('❌ Async upload failed:', error.message);
+    console.error('❌ Upload failed:', error.message);
     throw new Error(`Upload misslyckades: ${error.message}`);
   }
 };

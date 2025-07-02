@@ -514,8 +514,8 @@ class ProgressTracker:
         
         print(f"📈 Progress {self.task_id}: {progress}% - {message}")
 
-def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
-    """Synkron import med progress tracking"""
+def import_disk_with_progress(file_data: bytes, filename: str, task_id: str, replace_existing: bool = False):
+    """Synkron import med progress tracking och replace-stöd"""
     tracker = ProgressTracker(task_id)
     
     try:
@@ -525,45 +525,76 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
         data = json.loads(file_data.decode('utf-8'))
         
         if 'scan_info' not in data or 'tree' not in data:
-            tracker.update_progress("error", 0, "Fel: Ogiltig JSON-struktur", "")
+            tracker.update_progress("error", 0, "Fel: Ogiltig JSON-struktur", 
+                "Förväntar SimpleTreeIndexer format.")
             return {"success": False, "error": "Ogiltig JSON-struktur"}
         
-        tracker.update_progress("extracting", 15, "Extraherar fildata...", "Bygger fillista från träd")
+        tracker.update_progress("extracting", 10, "Extraherar fildata...", "Bygger fillista från träd")
         
         # Extrahera data
         scan_info = data['scan_info']
         tree = data['tree']
+        statistics = data.get('statistics', {})
         
-        # Skapa disk_name
+        # Skapa disk-namn från filnamnet
         base_filename = filename.replace('.json', '')
         safe_disk_name = re.sub(r'[^\w\-_\s]', '_', base_filename)
         
-        # Kontrollera duplicates
-        existing_disk = get_disk_by_name(safe_disk_name)
-        if existing_disk:
-            counter = 1
-            while True:
-                new_disk_name = f"{safe_disk_name}_{counter}"
-                if not get_disk_by_name(new_disk_name):
-                    safe_disk_name = new_disk_name
-                    break
-                counter += 1
+        # *** NY LOGIK: Hantera replace_existing ***
+        if replace_existing:
+            tracker.update_progress("replacing", 15, "Kontrollerar befintlig disk...", f"Söker efter: {safe_disk_name}")
+            
+            # Kontrollera om befintlig disk finns
+            existing_disk = get_disk_by_name(safe_disk_name)
+            if existing_disk:
+                tracker.update_progress("deleting", 18, "Tar bort befintlig disk...", 
+                    f"Raderar: {safe_disk_name} (ID: {existing_disk.id})")
+                
+                # Ta bort befintlig disk
+                success = delete_disk(safe_disk_name)
+                if not success:
+                    tracker.update_progress("error", 0, "Kunde inte ta bort befintlig disk", 
+                        f"Misslyckades med att radera: {safe_disk_name}")
+                    return {"success": False, "error": "Kunde inte ta bort befintlig disk"}
+                
+                tracker.update_progress("deleted", 22, "Befintlig disk borttagen", 
+                    f"Fortsätter med import av: {safe_disk_name}")
+            else:
+                tracker.update_progress("not_found", 20, "Ingen befintlig disk hittad", 
+                    f"Skapar ny disk: {safe_disk_name}")
+        else:
+            # Originallogik: Kontrollera duplicates och lägg till suffix om nödvändigt
+            existing_disk = get_disk_by_name(safe_disk_name)
+            if existing_disk:
+                counter = 1
+                original_name = safe_disk_name
+                while True:
+                    new_disk_name = f"{original_name}_{counter}"
+                    if not get_disk_by_name(new_disk_name):
+                        safe_disk_name = new_disk_name
+                        break
+                    counter += 1
+                
+                tracker.update_progress("renamed", 15, f"Disk finns redan, använder: {safe_disk_name}", 
+                    f"Undviker konflikt med befintlig disk")
         
         tracker.update_progress("preparing", 25, "Förbereder databasimport...", f"Disk namn: {safe_disk_name}")
         
         # Extrahera alla filer
         all_files = extract_all_files_with_paths(tree)
         total_files = len(all_files)
-        total_size = sum(f.get('size', 0) for f in all_files)
+        total_size = sum(f.get('file_size', f.get('size', 0)) for f in all_files)
         scan_date = scan_info.get('scan_date', '')
         
-        tracker.update_progress("creating_disk", 30, f"Skapar disk: {safe_disk_name}", f"{total_files} filer att importera")
+        tracker.update_progress("creating_disk", 30, f"Skapar disk: {safe_disk_name}", 
+            f"{total_files} filer att importera ({round(total_size / (1024*1024), 2)} MB)")
         
         # Skapa disk metadata
         disk_metadata = {
             "scan_info": scan_info,
-            "statistics": data.get('statistics', {}),
-            "original_filename": filename
+            "statistics": statistics,
+            "original_filename": filename,
+            "replaced_existing": replace_existing
         }
         
         # Skapa disk
@@ -573,6 +604,9 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
             path=f"/uploads/{filename}",
             status="imported"
         )
+        
+        tracker.update_progress("importing", 35, "Importerar filer...", 
+            f"Startar import av {total_files} filer")
         
         # Importera filer med progress
         session = SessionLocal()
@@ -587,7 +621,11 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
                         name=file_info.get('filename', file_info.get('name', '')),
                         path=file_info.get('file_path', file_info.get('path', '')),
                         size=file_info.get('file_size', file_info.get('size', 0)),
-                        file_type=file_info.get('extension', '').lstrip('.') if file_info.get('extension') else None,
+                        file_type=file_info.get('extension', '').lstrip('.') 
+                            if file_info.get('extension') else None,
+                        client=file_info.get('client'),
+                        project=file_info.get('project'),
+                        keywords=file_info.get('keywords'),
                         checksum=file_info.get('checksum', ''),
                         mime_type=file_info.get('mime_type', '')
                     )
@@ -596,7 +634,7 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
                     
                     # Progress updates varje 25:e fil
                     if files_imported % 25 == 0 or files_imported % batch_size == 0:
-                        progress = 30 + (files_imported / total_files) * 60  # 30-90%
+                        progress = 35 + (files_imported / total_files) * 55  # 35-90%
                         tracker.update_progress(
                             "importing", 
                             progress,
@@ -604,7 +642,7 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
                             f"{((files_imported/total_files)*100):.1f}% klart"
                         )
                     
-                    # Commit i batches
+                    # Commit i batches för bättre prestanda
                     if files_imported % batch_size == 0:
                         session.commit()
                         
@@ -612,6 +650,7 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
                     print(f"⚠️ Error importing file {file_info.get('filename', file_info.get('name', ''))}: {e}")
                     continue
             
+            # Final commit
             session.commit()
             
             tracker.update_progress("directories", 92, "Skapar mappstruktur...", "Populerar directories")
@@ -628,10 +667,12 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
                 "directories_created": directories_created,
                 "total_files": total_files,
                 "total_size_mb": round(total_size / (1024*1024), 2),
-                "message": f"Hårddisk {safe_disk_name} importerad framgångsrikt"
+                "replaced_existing": replace_existing,
+                "message": f"Hårddisk {safe_disk_name} {'ersatt' if replace_existing else 'importerad'} framgångsrikt"
             }
             
-            tracker.update_progress("complete", 100, "Import slutförd!", f"Importerade {files_imported} filer")
+            tracker.update_progress("complete", 100, "Import slutförd!", 
+                f"Importerade {files_imported} filer")
             
             # Spara slutresultat
             with progress_lock:
@@ -688,7 +729,11 @@ def check_duplicate(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Kunde inte kontrollera duplicate: {str(e)}")
 
 @app.post("/upload/json-index-async")
-def upload_json_index_async(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+def upload_json_index_async(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...),
+    replace_existing: bool = False  # Ny parameter
+):
     """Async upload endpoint med progress tracking"""
     
     if not file.filename.endswith('.json'):
@@ -700,14 +745,21 @@ def upload_json_index_async(background_tasks: BackgroundTasks, file: UploadFile 
     # Läs fildata synkront (måste göras här för att få access till filen)
     file_data = file.file.read()
     
-    # Starta background task
-    background_tasks.add_task(import_disk_with_progress, file_data, file.filename, task_id)
+    # Starta background task MED replace_existing parameter
+    background_tasks.add_task(
+        import_disk_with_progress, 
+        file_data, 
+        file.filename, 
+        task_id, 
+        replace_existing  # Skicka vidare parametern
+    )
     
     return {
         "success": True,
         "task_id": task_id,
         "message": "Import startad",
-        "progress_url": f"/upload/progress/{task_id}"
+        "progress_url": f"/upload/progress/{task_id}",
+        "replace_existing": replace_existing
     }
 
 @app.get("/upload/progress/{task_id}")
