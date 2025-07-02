@@ -5,10 +5,10 @@ import {
   Button,
   Card,
   Spinner,
-  Badge,
   makeStyles,
   tokens,
   shorthands,
+  typographyStyles,
 } from '@fluentui/react-components';
 import {
   Storage20Regular,
@@ -90,6 +90,8 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     marginTop: '16px',
   },
+  title: typographyStyles.title2,
+  titleLarge: typographyStyles.display,
 });
 
 const Dashboard = () => {
@@ -169,19 +171,9 @@ const Dashboard = () => {
     <div>
       {/* Header */}
       <div className={styles.header}>
-        <ChartMultiple20Regular style={{ fontSize: '32px', color: tokens.colorBrandForeground1 }} />
         <div>
-          <Text size={700} weight="bold">Dashboard</Text>
-          <Text>Översikt över dina lagrade hårddiskar</Text>
+          <Text className={styles.titleLarge}>Dashboard</Text>
         </div>
-        <Button 
-          appearance="subtle" 
-          icon={<ArrowClockwise20Regular />}
-          onClick={fetchDisks}
-          disabled={loading}
-        >
-          Uppdatera
-        </Button>
       </div>
 
       {/* Stats */}
@@ -207,7 +199,7 @@ const Dashboard = () => {
 
       {/* Disks Section */}
       <div className={styles.sectionHeader}>
-        <Storage20Regular style={{ fontSize: '20px' }} />
+        <Storage20Regular style={{ fontSize: '40px' }} />
         <Text size={600} weight="semibold">Hårddiskar</Text>
       </div>
 
@@ -229,19 +221,9 @@ const Dashboard = () => {
             >
               <div style={{ padding: '16px' }}>
                 <div className={styles.diskHeader}>
-                  <Storage20Regular style={{ fontSize: '20px', color: tokens.colorBrandForeground1 }} />
                   <Text weight="semibold" size={500}>{disk.disk_name}</Text>
-                  <Badge appearance="filled" color="brand" size="small">
-                    {disk.disk_id}
-                  </Badge>
                 </div>
                 
-                {disk.description && (
-                  <Text block style={{ marginBottom: '12px', color: tokens.colorNeutralForeground2 }}>
-                    {disk.description}
-                  </Text>
-                )}
-
                 <div className={styles.diskStats}>
                   <div className={styles.diskStat}>
                     <Document20Regular style={{ fontSize: '14px' }} />

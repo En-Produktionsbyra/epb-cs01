@@ -31,13 +31,12 @@ const API_BASE = getApiBaseUrl();
 console.log('=== API Configuration ===');
 console.log('Frontend URL:', window.location.origin);
 console.log('API Base URL:', API_BASE);
-//console.log('Environment API URL:', process.env.REACT_APP_API_URL || 'not set');
 console.log('========================');
 
 // Axios instance
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
+  timeout: 300000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -224,14 +223,14 @@ export const fetchStats = async () => {
 };
 
 /**
- * Ladda upp hårddisk-paket
+ * Ladda upp hårddisk-paket - GAMLA SYNKRONA METODEN
  */
 export const uploadDiskPackage = async (file, onUploadProgress = null) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
     
-    console.log('📤 Uploading file:', file.name);
+    console.log('📤 Uploading file (sync):', file.name);
     const response = await api.post('/upload/json-index', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
@@ -244,6 +243,119 @@ export const uploadDiskPackage = async (file, onUploadProgress = null) => {
   } catch (error) {
     console.error('❌ Upload failed:', error.message);
     throw new Error(`Upload misslyckades: ${error.message}`);
+  }
+};
+
+/**
+ * Ladda upp hårddisk-paket - NY ASYNKRONA METODEN MED PROGRESS
+ */
+export const uploadDiskPackageAsync = async (file) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    console.log('📤 Starting async upload:', file.name);
+    const response = await api.post('/upload/json-index-async', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    console.log('✅ Async upload started:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Async upload failed:', error.message);
+    throw new Error(`Upload misslyckades: ${error.message}`);
+  }
+};
+
+/**
+ * Anslut till progress stream via Server-Sent Events
+ */
+export const connectToProgressStream = (taskId, onProgress, onComplete, onError) => {
+  const eventSource = new EventSource(`${API_BASE}/upload/progress/${taskId}`);
+  
+  console.log('📡 Connecting to progress stream:', taskId);
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      
+      console.log('📈 Progress update:', data);
+      
+      // Hantera olika meddelanden
+      if (data.status === 'connected') {
+        console.log('✅ EventSource connected');
+        return;
+      }
+      
+      if (data.status === 'heartbeat' || data.status === 'waiting') {
+        console.log('💓 Heartbeat:', data.message);
+        return;
+      }
+      
+      if (data.status === 'finished' || data.status === 'timeout') {
+        console.log('🏁 Progress stream finished:', data.status);
+        eventSource.close();
+        return;
+      }
+      
+      // Anropa progress callback för riktiga progress updates
+      if (data.step && onProgress) {
+        onProgress(data);
+      }
+      
+      // Hantera slutresultat
+      if (data.step === 'complete' && data.result) {
+        console.log('✅ Import complete:', data.result);
+        if (onComplete) {
+          onComplete(data.result);
+        }
+        eventSource.close();
+      } else if (data.step === 'error') {
+        console.error('❌ Import error:', data.message);
+        if (onError) {
+          onError(new Error(data.message));
+        }
+        eventSource.close();
+      }
+      
+    } catch (err) {
+      console.error('❌ Error parsing progress data:', err);
+      if (onError) {
+        onError(err);
+      }
+    }
+  };
+  
+  eventSource.onerror = (error) => {
+    console.error('❌ EventSource error:', error);
+    eventSource.close();
+    if (onError) {
+      onError(new Error('Anslutningsfel under import'));
+    }
+  };
+  
+  eventSource.onopen = () => {
+    console.log('🔌 EventSource connection opened');
+  };
+  
+  // Returnera eventSource så att den kan stängas manuellt
+  return eventSource;
+};
+
+/**
+ * Hämta upload status för en task
+ */
+export const getUploadStatus = async (taskId) => {
+  try {
+    console.log('📊 Getting upload status:', taskId);
+    const response = await api.get(`/upload/status/${taskId}`);
+    console.log('✅ Status fetched:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Failed to get status:', taskId, error.message);
+    throw new Error(`Kunde inte hämta status: ${error.message}`);
   }
 };
 

@@ -1,5 +1,12 @@
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import BackgroundTasks
+from fastapi.responses import StreamingResponse
+import asyncio
+import uuid
+from typing import Dict, Optional
+import threading
+
 from typing import Optional
 import os
 import sys
@@ -8,6 +15,9 @@ import tempfile
 import zipfile
 from datetime import datetime
 import re
+
+progress_store: Dict[str, dict] = {}
+progress_lock = threading.Lock()
 
 # Lägg till projektets root-katalog i Python path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -689,17 +699,263 @@ async def browse_directory(
     except Exception as e:
         print(f"❌ Browse error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+class ProgressTracker:
+    def __init__(self, task_id: str):
+        self.task_id = task_id
+        
+    def update_progress(self, step: str, progress: float, message: str, details: str = ""):
+        """Uppdatera progress (synkron version)"""
+        progress_data = {
+            "task_id": self.task_id,
+            "step": step,
+            "progress": round(progress, 1),
+            "message": message,
+            "details": details,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        with progress_lock:
+            progress_store[self.task_id] = progress_data
+        
+        print(f"📈 Progress {self.task_id}: {progress}% - {message}")
 
+def import_disk_with_progress(file_data: bytes, filename: str, task_id: str):
+    """Synkron import med progress tracking"""
+    tracker = ProgressTracker(task_id)
+    
+    try:
+        tracker.update_progress("parsing", 5, "Analyserar JSON-fil...", "Läser filinnehåll")
+        
+        # Parse JSON
+        data = json.loads(file_data.decode('utf-8'))
+        
+        if 'scan_info' not in data or 'tree' not in data:
+            tracker.update_progress("error", 0, "Fel: Ogiltig JSON-struktur", "")
+            return {"success": False, "error": "Ogiltig JSON-struktur"}
+        
+        tracker.update_progress("extracting", 15, "Extraherar fildata...", "Bygger fillista från träd")
+        
+        # Extrahera data (samma som din befintliga kod)
+        scan_info = data['scan_info']
+        tree = data['tree']
+        
+        # Skapa disk_id (samma logik som innan)
+        base_filename = filename.replace('.json', '')
+        safe_disk_id = re.sub(r'[^\w\-_]', '_', base_filename)
+        
+        # Database setup
+        conn = db_manager.get_connection()  # Använd befintlig db_manager
+        cursor = conn.cursor()
+        
+        # Check for duplicates
+        cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (safe_disk_id,))
+        if cursor.fetchone():
+            counter = 1
+            while True:
+                new_disk_id = f"{safe_disk_id}_{counter}"
+                cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (new_disk_id,))
+                if not cursor.fetchone():
+                    safe_disk_id = new_disk_id
+                    break
+                counter += 1
+        
+        disk_id = safe_disk_id
+        disk_name = base_filename
+        
+        tracker.update_progress("preparing", 25, "Förbereder databasimport...", f"Disk ID: {disk_id}")
+        
+        # Extrahera alla filer (använd din befintliga funktion)
+        all_files = extract_all_files_with_paths(tree, scan_info.get('root_path', ''))
+        total_files = len(all_files)
+        total_size = sum(f.get('file_size', 0) for f in all_files)
+        scan_date = scan_info.get('scan_date', '')
+        
+        tracker.update_progress("creating_disk", 30, f"Skapar disk: {disk_name}", f"{total_files} filer att importera")
+        
+        # Skapa disk (samma som din kod)
+        cursor.execute('''
+            INSERT INTO disks (
+                disk_id, disk_name, description, total_size, file_count, 
+                scan_date, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            disk_id, disk_name, f"Importerad från {filename}",
+            total_size, total_files, scan_date, 'active'
+        ))
+        
+        # Importera filer med progress
+        files_imported = 0
+        batch_size = 100
+        
+        for i, file_info in enumerate(all_files):
+            try:
+                cursor.execute('''
+                    INSERT INTO files (
+                        disk_id, filename, file_path, full_path, file_size,
+                        file_type, mime_type, created_date, modified_date,
+                        scan_date, client, project, keywords
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    disk_id, file_info['filename'], file_info['file_path'], 
+                    file_info['full_path'], file_info['file_size'],
+                    file_info['extension'].lstrip('.') if file_info['extension'] else None,
+                    None, file_info['created'], file_info['modified'], 
+                    scan_date, None, None, None
+                ))
+                files_imported += 1
+                
+                # Progress updates varje 25:e fil
+                if files_imported % 25 == 0 or files_imported % batch_size == 0:
+                    progress = 30 + (files_imported / total_files) * 60  # 30-90%
+                    tracker.update_progress(
+                        "importing", 
+                        progress,
+                        f"Importerar filer: {files_imported}/{total_files}",
+                        f"{((files_imported/total_files)*100):.1f}% klart"
+                    )
+                
+                # Commit i batches
+                if files_imported % batch_size == 0:
+                    conn.commit()
+                    
+            except Exception as e:
+                print(f"⚠️ Error importing file {file_info['filename']}: {e}")
+                continue
+        
+        conn.commit()
+        
+        tracker.update_progress("directories", 92, "Skapar mappstruktur...", "Populerar directories")
+        
+        # Skapa directories (använd din befintliga funktion)
+        directories_created = populate_directories_for_disk(cursor, disk_id)
+        conn.commit()
+        conn.close()
+        
+        # Slutresultat
+        result = {
+            "success": True,
+            "disk_id": disk_id,
+            "disk_name": disk_name,
+            "files_imported": files_imported,
+            "directories_created": directories_created,
+            "total_files": total_files,
+            "total_size_mb": round(total_size / (1024*1024), 2),
+            "message": f"Hårddisk {disk_id} importerad framgångsrikt"
+        }
+        
+        tracker.update_progress("complete", 100, "Import slutförd!", f"Importerade {files_imported} filer")
+        
+        # Spara slutresultat
+        with progress_lock:
+            progress_store[task_id]["result"] = result
+        
+        return result
+        
+    except Exception as e:
+        tracker.update_progress("error", 0, f"Fel vid import: {str(e)}", "")
+        return {"success": False, "error": str(e)}
+
+# Lägg till dessa endpoints i din FastAPI app
+
+@app.post("/upload/json-index-async")
+async def upload_json_index_async(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Ny async upload endpoint"""
+    
+    if not file.filename.endswith('.json'):
+        raise HTTPException(status_code=400, detail="Endast JSON-filer tillåtna")
+    
+    # Generera unique task ID
+    task_id = str(uuid.uuid4())
+    
+    # Läs fildata
+    file_data = await file.read()
+    
+    # Starta background task (synkron version)
+    background_tasks.add_task(import_disk_with_progress, file_data, file.filename, task_id)
+    
+    return {
+        "success": True,
+        "task_id": task_id,
+        "message": "Import startad",
+        "progress_url": f"/upload/progress/{task_id}"
+    }
+
+@app.get("/upload/progress/{task_id}")
+async def get_upload_progress_stream(task_id: str):
+    """Server-Sent Events för progress"""
+    
+    async def event_stream():
+        # Skicka initial heartbeat
+        yield "data: {\"status\": \"connected\"}\n\n"
+        
+        last_progress = -1
+        timeout_count = 0
+        max_timeout = 120  # 2 minuters timeout
+        
+        while timeout_count < max_timeout:
+            with progress_lock:
+                if task_id in progress_store:
+                    current_data = progress_store[task_id].copy()
+                    current_progress = current_data.get("progress", 0)
+                    
+                    # Skicka bara om progress har ändrats
+                    if current_progress != last_progress:
+                        yield f"data: {json.dumps(current_data)}\n\n"
+                        last_progress = current_progress
+                        timeout_count = 0  # Reset timeout
+                        
+                        # Avsluta om färdig eller fel
+                        if current_data.get("step") in ["complete", "error"]:
+                            yield f"data: {json.dumps({'status': 'finished'})}\n\n"
+                            break
+                    else:
+                        # Skicka heartbeat varje 10:e sekund
+                        if timeout_count % 10 == 0:
+                            yield f"data: {json.dumps({'status': 'heartbeat', 'timestamp': datetime.now().isoformat()})}\n\n"
+                        timeout_count += 1
+                else:
+                    # Task finns inte än, skicka heartbeat
+                    if timeout_count % 5 == 0:
+                        yield f"data: {json.dumps({'status': 'waiting', 'message': 'Väntar på task...'})}\n\n"
+                    timeout_count += 1
+            
+            await asyncio.sleep(1)  # Kolla varje sekund
+        
+        # Timeout - skicka avslutning
+        yield f"data: {json.dumps({'status': 'timeout', 'message': 'Timeout efter 2 minuter'})}\n\n"
+    
+    return StreamingResponse(
+        event_stream(), 
+        media_type="text/event-stream",  # RÄTT MIME-TYP!
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "X-Accel-Buffering": "no",  # Nginx fix
+        }
+    )
+
+@app.get("/upload/status/{task_id}")
+async def get_upload_status(task_id: str):
+    """Hämta status för en upload-task"""
+    with progress_lock:
+        if task_id in progress_store:
+            return progress_store[task_id]
+        else:
+            raise HTTPException(status_code=404, detail="Task inte hittad")
+        
 @app.post("/upload/json-index")
 async def upload_json_index(file: UploadFile = File(...)):
     """Ladda upp och importera JSON-index från SimpleTreeIndexer"""
-    print(f"📁 Uploading file: {file.filename}")
+    print(f"📤 Started processing: {file.filename}")
     
     if not file.filename.endswith('.json'):
         raise HTTPException(status_code=400, detail="Endast JSON-filer tillåtna")
     
     try:
         # Läs JSON-innehåll
+        print(f"📖 Reading JSON content from {file.filename}")
         content = await file.read()
         data = json.loads(content.decode('utf-8'))
         
@@ -714,7 +970,6 @@ async def upload_json_index(file: UploadFile = File(...)):
         
         # NYTT: Använd filnamnet som bas för disk_id
         base_filename = file.filename.replace('.json', '')
-        # Rensa ogiltiga tecken för disk_id
         safe_disk_id = re.sub(r'[^\w\-_]', '_', base_filename)
         
         # Kontrollera om disk redan finns
@@ -723,7 +978,6 @@ async def upload_json_index(file: UploadFile = File(...)):
         
         cursor.execute("SELECT disk_id FROM disks WHERE disk_id = ?", (safe_disk_id,))
         if cursor.fetchone():
-            # Lägg till suffix om den redan finns
             counter = 1
             while True:
                 new_disk_id = f"{safe_disk_id}_{counter}"
@@ -734,20 +988,19 @@ async def upload_json_index(file: UploadFile = File(...)):
                 counter += 1
         
         disk_id = safe_disk_id
-        
-        # Skapa disk-namn från filnamnet eller root path som fallback
         disk_name = base_filename
         if not disk_name.strip():
-            # Fallback till root path om filnamnet är tomt
             root_path = scan_info.get('root_path', '')
             disk_name = root_path.split('/')[-1] if root_path else f"Disk {disk_id}"
         
         # Beräkna statistik
-        total_size = sum(f.get('size', 0) for f in extract_all_files(tree))
-        total_files = statistics.get('total_files', 0)
+        print(f"📊 Extracting file data from tree structure...")
+        all_files = extract_all_files_with_paths(tree, scan_info.get('root_path', ''))
+        total_files = len(all_files)
+        total_size = sum(f.get('file_size', 0) for f in all_files)
         scan_date = scan_info.get('scan_date', '')
         
-        print(f"💿 Creating disk: {disk_id} ({disk_name}) from file: {file.filename}")
+        print(f"💿 Creating disk: {disk_id} ({disk_name}) with {total_files} files")
         
         # Lägg till disk i databasen
         cursor.execute('''
@@ -765,13 +1018,12 @@ async def upload_json_index(file: UploadFile = File(...)):
             'active'
         ))
         
-        # Extrahera och importera alla filer
+        # Importera filer med progress logging
+        print(f"📈 Starting database import: {total_files} files to process")
         files_imported = 0
-        all_files = extract_all_files_with_paths(tree, scan_info.get('root_path', ''))
+        batch_size = 100  # Commit i batches för bättre prestanda
         
-        print(f"📄 Importing {len(all_files)} files...")
-        
-        for file_info in all_files:
+        for i, file_info in enumerate(all_files):
             try:
                 cursor.execute('''
                     INSERT INTO files (
@@ -790,16 +1042,29 @@ async def upload_json_index(file: UploadFile = File(...)):
                     file_info['created'],
                     file_info['modified'],
                     scan_date,
-                    None,  # client - kommer fyllas i via tagging
-                    None,  # project - kommer fyllas i via tagging
+                    None,  # client
+                    None,  # project
                     None   # keywords
                 ))
                 files_imported += 1
+                
+                # Progress logging var 500:e fil eller i slutet av batches
+                if (files_imported % 500 == 0) or (files_imported % batch_size == 0):
+                    progress_percent = (files_imported / total_files) * 100
+                    print(f"📈 Progress: {progress_percent:.1f}% ({files_imported}/{total_files} files)")
+                    
+                # Commit i batches för bättre prestanda
+                if files_imported % batch_size == 0:
+                    conn.commit()
+                    
             except Exception as e:
                 print(f"⚠️ Error importing file {file_info['filename']}: {e}")
                 continue
         
-        # NYT: Populera directories-tabellen
+        # Final commit
+        conn.commit()
+        
+        # Populera directories-tabellen
         print(f"📁 Building directories structure...")
         directories_created = populate_directories_for_disk(cursor, disk_id)
         print(f"✅ Created {directories_created} directory entries")
@@ -807,7 +1072,7 @@ async def upload_json_index(file: UploadFile = File(...)):
         conn.commit()
         conn.close()
         
-        print(f"✅ Import complete: {files_imported} files imported, {directories_created} directories created")
+        print(f"✅ Completed processing {file.filename}: {files_imported} files imported, {directories_created} directories created")
         
         return {
             "success": True,
@@ -816,7 +1081,7 @@ async def upload_json_index(file: UploadFile = File(...)):
             "files_imported": files_imported,
             "directories_created": directories_created,
             "total_files": total_files,
-            "total_size": total_size,
+            "total_size_mb": round(total_size / (1024*1024), 2),
             "message": f"Hårddisk {disk_id} importerad framgångsrikt"
         }
         

@@ -1,347 +1,445 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Text,
   Button,
-  Card,
   ProgressBar,
-  makeStyles,
+  Card,
   tokens,
+  makeStyles,
   shorthands,
   Badge,
+  Divider,
+  Spinner,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
 } from '@fluentui/react-components';
 import {
-  CloudArrowUp20Regular,
-  Document20Regular,
-  CheckmarkCircle20Regular,
-  ErrorCircle20Regular,
-  Folder20Regular,
+  DocumentArrowUp20Regular,
+  DocumentArrowUp20Filled,
+  CloudArrowUp24Regular,
+  Database24Regular,
+  CheckmarkCircle24Regular,
+  ErrorCircle24Regular,
+  Document24Regular,
+  FolderOpen24Regular,
+  Info24Regular,
+  bundleIcon,
 } from '@fluentui/react-icons';
+import { uploadDiskPackageAsync, connectToProgressStream } from '../../utils/api';
+
+const DocumentArrowUpIcon = bundleIcon(DocumentArrowUp20Filled, DocumentArrowUp20Regular);
 
 const useStyles = makeStyles({
   container: {
-    height: '100%',
+    ...shorthands.padding('24px'),
+    maxWidth: '800px',
+    margin: '0 auto',
     display: 'flex',
     flexDirection: 'column',
-    ...shorthands.padding('24px'),
+    gap: '24px',
   },
   header: {
-    marginBottom: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
   },
-  uploadArea: {
-    borderTopWidth: '2px',
-    borderRightWidth: '2px',
-    borderBottomWidth: '2px',
-    borderLeftWidth: '2px',
-    borderTopStyle: 'dashed',
-    borderRightStyle: 'dashed',
-    borderBottomStyle: 'dashed',
-    borderLeftStyle: 'dashed',
-    borderTopColor: tokens.colorNeutralStroke2,
-    borderRightColor: tokens.colorNeutralStroke2,
-    borderBottomColor: tokens.colorNeutralStroke2,
-    borderLeftColor: tokens.colorNeutralStroke2,
-    borderRadius: '8px',
-    ...shorthands.padding('48px', '24px'),
+  dropZone: {
+    ...shorthands.border('2px', 'dashed', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.padding('40px'),
     textAlign: 'center',
-    marginBottom: '24px',
+    backgroundColor: tokens.colorNeutralBackground2,
     cursor: 'pointer',
-    transitionProperty: 'all',
-    transitionDuration: '0.2s',
-    transitionTimingFunction: 'ease',
+    transition: 'all 0.2s ease-in-out',
     '&:hover': {
-      borderTopColor: tokens.colorBrandStroke1,
-      borderRightColor: tokens.colorBrandStroke1,
-      borderBottomColor: tokens.colorBrandStroke1,
-      borderLeftColor: tokens.colorBrandStroke1,
-      backgroundColor: tokens.colorNeutralBackground1Hover,
+      backgroundColor: tokens.colorNeutralBackground1,
+      borderColor: tokens.colorBrandStroke1,
+      transform: 'translateY(-1px)',
+      boxShadow: tokens.shadow4,
     },
-    '&.dragover': {
-      borderTopColor: tokens.colorBrandStroke1,
-      borderRightColor: tokens.colorBrandStroke1,
-      borderBottomColor: tokens.colorBrandStroke1,
-      borderLeftColor: tokens.colorBrandStroke1,
+    '&.dragOver': {
       backgroundColor: tokens.colorBrandBackground2,
+      borderColor: tokens.colorBrandStroke1,
+      borderStyle: 'solid',
+      transform: 'scale(1.01)',
+      boxShadow: tokens.shadow8,
     },
   },
-  uploadIcon: {
-    fontSize: '48px',
-    color: tokens.colorNeutralForeground3,
-    marginBottom: '16px',
+  dropZoneContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '12px',
   },
-  fileInput: {
-    display: 'none',
+  fileList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
   },
-  uploadProgress: {
-    marginTop: '16px',
+  fileItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    ...shorthands.padding('12px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusSmall,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  results: {
-    marginTop: '24px',
+  fileInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
   },
-  resultCard: {
-    marginBottom: '12px',
-    ...shorthands.padding('16px'),
+  progressSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
   },
-  success: {
-    color: tokens.colorPaletteGreenForeground1,
+  statusRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
   },
-  error: {
-    color: tokens.colorPaletteRedForeground1,
+  detailedStatus: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    ...shorthands.padding('12px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusSmall,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  filePreview: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.padding('16px'),
-    borderRadius: '8px',
-    marginTop: '16px',
-    fontFamily: 'monospace',
-    fontSize: '12px',
-    maxHeight: '200px',
-    overflow: 'auto',
+  resultsSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
   },
 });
 
+// Upload är nu importerad från utils/api
+
 const Upload = () => {
   const styles = useStyles();
-  const [dragOver, setDragOver] = useState(false);
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [currentStatus, setCurrentStatus] = useState('');
+  const [currentStep, setCurrentStep] = useState('');
+  const [detailedProgress, setDetailedProgress] = useState('');
   const [results, setResults] = useState([]);
-  const [previewData, setPreviewData] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
 
-  const handleDragOver = useCallback((e) => {
+  const handleFileSelect = (selectedFiles) => {
+    setFiles(selectedFiles);
+    setResults([]);
+  };
+
+  const handleInputChange = (e) => {
+    const selectedFiles = Array.from(e.target.files);
+    handleFileSelect(selectedFiles);
+  };
+
+  const handleDragOver = (e) => {
     e.preventDefault();
     setDragOver(true);
-  }, []);
+  };
 
-  const handleDragLeave = useCallback((e) => {
+  const handleDragLeave = (e) => {
     e.preventDefault();
     setDragOver(false);
-  }, []);
+  };
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    handleFiles(droppedFiles);
-  }, []);
-
-  const handleFileSelect = useCallback((e) => {
-    const selectedFiles = Array.from(e.target.files);
-    handleFiles(selectedFiles);
-  }, []);
-
-  const handleFiles = (fileList) => {
-    // Filtrera bara JSON-filer
-    const jsonFiles = fileList.filter(file => 
-      file.name.toLowerCase().endsWith('.json') || 
-      file.type === 'application/json'
+    const droppedFiles = Array.from(e.dataTransfer.files).filter(
+      file => file.type === 'application/json' || file.name.endsWith('.json')
     );
-
-    if (jsonFiles.length === 0) {
-      alert('Endast JSON-filer accepteras');
-      return;
-    }
-
-    setFiles(jsonFiles);
-    
-    // Preview första filen
-    if (jsonFiles.length > 0) {
-      previewFile(jsonFiles[0]);
+    if (droppedFiles.length > 0) {
+      handleFileSelect(droppedFiles);
     }
   };
 
-  const previewFile = async (file) => {
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      setPreviewData(data);
-    } catch (err) {
-      console.error('Kunde inte läsa fil:', err);
-      setPreviewData({ error: 'Ogiltig JSON-fil' });
-    }
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${Math.round(bytes / (1024 * 1024))} MB`;
   };
 
   const uploadFiles = async () => {
     setUploading(true);
     setUploadProgress(0);
     setResults([]);
+    setCurrentStatus('Startar upload...');
+    setDetailedProgress('');
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       
       try {
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const response = await fetch('http://localhost:8000/upload/json-index', {
-          method: 'POST',
-          body: formData,
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-          setResults(prev => [...prev, {
-            file: file.name,
-            status: 'success',
-            message: `Importerade ${result.files_imported} filer från ${result.disk_name}`,
-            data: result
-          }]);
+        setCurrentStatus(`Startar upload av ${file.name}...`);
+        
+        // Starta upload och få task ID
+        const uploadResponse = await uploadDiskPackageAsync(file);
+        
+        if (uploadResponse.success && uploadResponse.task_id) {
+          setCurrentStatus(`Upload startad för ${file.name}, följer progress...`);
+          
+          // Anslut till progress stream med callbacks
+          const eventSource = connectToProgressStream(
+            uploadResponse.task_id,
+            // onProgress callback
+            (progressData) => {
+              setUploadProgress(progressData.progress || 0);
+              setCurrentStatus(progressData.message || '');
+              setCurrentStep(progressData.step || '');
+              setDetailedProgress(progressData.details || '');
+            },
+            // onComplete callback
+            (result) => {
+              setResults(prev => [...prev, {
+                file: file.name,
+                status: 'success',
+                message: result.message,
+                details: `Importerade ${result.files_imported} filer, ${result.directories_created} mappar`,
+                data: result
+              }]);
+              setUploading(false);
+            },
+            // onError callback
+            (error) => {
+              setResults(prev => [...prev, {
+                file: file.name,
+                status: 'error',
+                message: error.message,
+                details: 'Import misslyckades'
+              }]);
+              setUploading(false);
+            }
+          );
+          
+          // Vänta på att denna fil ska bli klar
+          await new Promise((resolve) => {
+            const checkComplete = () => {
+              if (!uploading || currentStep === 'complete' || currentStep === 'error') {
+                resolve();
+              } else {
+                setTimeout(checkComplete, 500);
+              }
+            };
+            
+            // Timeout efter 5 minuter
+            setTimeout(() => {
+              eventSource.close();
+              resolve();
+            }, 300000);
+            
+            checkComplete();
+          });
+          
         } else {
-          setResults(prev => [...prev, {
-            file: file.name,
-            status: 'error',
-            message: result.detail || 'Upload misslyckades'
-          }]);
+          throw new Error('Upload misslyckades');
         }
+        
       } catch (err) {
         setResults(prev => [...prev, {
           file: file.name,
           status: 'error',
-          message: err.message
+          message: err.message,
+          details: 'Upload eller processning misslyckades'
         }]);
       }
-
-      setUploadProgress(((i + 1) / files.length) * 100);
     }
 
-    setUploading(false);
+    if (currentStep !== 'complete') {
+      setCurrentStatus(`Slutförde ${files.length} fil(er).`);
+      setUploading(false);
+    }
   };
 
-  const formatFileSize = (bytes) => {
-    if (!bytes) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const k = 1024;
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${units[i]}`;
+  const getStatusIcon = () => {
+    switch (currentStep) {
+      case 'parsing':
+      case 'extracting':
+        return <Info24Regular />;
+      case 'preparing':
+      case 'creating_disk':
+        return <CloudArrowUp24Regular />;
+      case 'importing':
+      case 'directories':
+        return <Database24Regular />;
+      case 'complete':
+        return <CheckmarkCircle24Regular />;
+      case 'error':
+        return <ErrorCircle24Regular />;
+      default:
+        return <DocumentArrowUpIcon />;
+    }
   };
 
   return (
     <div className={styles.container}>
       {/* Header */}
       <div className={styles.header}>
-        <Text size={700} weight="bold" block style={{ marginBottom: '8px' }}>
-          <CloudArrowUp20Regular style={{ marginRight: '8px' }} />
-          Ladda upp hårddisk-index
+        <DocumentArrowUpIcon />
+        <Text as="h1" size={900} weight="bold">
+          Ladda upp hårddisk-paket
         </Text>
-        <Text>Ladda upp JSON-filer från indexering-scriptet för att importera nya hårddiskar</Text>
       </div>
+      
+      {/* Description */}
+      <MessageBar intent="info">
+        <MessageBarBody>
+          <MessageBarTitle>Information</MessageBarTitle>
+          Välj eller dra JSON-filer som innehåller hårddisk-indexering för import till databasen.
+        </MessageBarBody>
+      </MessageBar>
 
-      {/* Upload Area */}
-      <div
-        className={`${styles.uploadArea} ${dragOver ? 'dragover' : ''}`}
+      {/* Drop Zone */}
+      <div 
+        className={`${styles.dropZone} ${dragOver ? 'dragOver' : ''}`}
+        onClick={() => document.getElementById('fileInput').click()}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => document.getElementById('fileInput').click()}
+        role="button"
+        tabIndex={0}
+        aria-label="Klicka för att välja filer eller dra och släpp JSON-filer här"
       >
-        <CloudArrowUp20Regular className={styles.uploadIcon} />
-        <Text size={500} weight="semibold" block style={{ marginBottom: '8px' }}>
-          Dra och släpp JSON-filer här
-        </Text>
-        <Text>eller klicka för att välja filer</Text>
-        <Text size={200} style={{ marginTop: '8px', color: tokens.colorNeutralForeground2 }}>
-          Accepterar .json filer från SimpleTreeIndexer
-        </Text>
+        <input
+          id="fileInput"
+          type="file"
+          multiple
+          accept=".json,application/json"
+          onChange={handleInputChange}
+          style={{ display: 'none' }}
+          aria-hidden="true"
+        />
+        <div className={styles.dropZoneContent}>
+          <FolderOpen24Regular 
+            primaryFill={dragOver ? tokens.colorBrandForeground1 : tokens.colorNeutralForeground2}
+          />
+          <Text size={500} weight="semibold">
+            {dragOver ? 'Släpp filerna här' : 'Klicka här eller dra JSON-filer'}
+          </Text>
+          <Text size={300}>
+            Stöder flera filer samtidigt (.json format)
+          </Text>
+        </div>
       </div>
-
-      <input
-        id="fileInput"
-        type="file"
-        multiple
-        accept=".json,application/json"
-        className={styles.fileInput}
-        onChange={handleFileSelect}
-      />
 
       {/* Selected Files */}
       {files.length > 0 && (
-        <Card className={styles.resultCard}>
-          <Text weight="semibold" block style={{ marginBottom: '12px' }}>
-            Valda filer ({files.length}):
-          </Text>
-          {files.map((file, index) => (
-            <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <Document20Regular />
-              <Text>{file.name}</Text>
-              <Badge appearance="tint" size="small">
-                {formatFileSize(file.size)}
+        <Card>
+          <div style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <Document24Regular />
+              <Text size={400} weight="semibold">
+                Valda filer
+              </Text>
+              <Badge size="small" appearance="filled" color="brand">
+                {files.length}
               </Badge>
             </div>
-          ))}
-          
-          <div style={{ marginTop: '16px' }}>
+            
+            <Divider />
+            
+            <div className={styles.fileList} style={{ marginTop: '16px' }}>
+              {files.map((file, index) => (
+                <div key={index} className={styles.fileItem}>
+                  <Document24Regular />
+                  <div className={styles.fileInfo}>
+                    <Text size={300} weight="medium">
+                      {file.name}
+                    </Text>
+                    <Text size={200}>
+                      {formatFileSize(file.size)}
+                    </Text>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
             <Button
               appearance="primary"
+              size="large"
               onClick={uploadFiles}
               disabled={uploading}
+              icon={uploading ? <Spinner size="tiny" /> : <CloudArrowUp24Regular />}
+              style={{ marginTop: '16px', width: '100%' }}
             >
-              {uploading ? 'Laddar upp...' : 'Ladda upp och importera'}
+              {uploading ? 'Processar...' : 'Starta upload'}
             </Button>
           </div>
         </Card>
       )}
 
-      {/* Upload Progress */}
+      {/* Progress */}
       {uploading && (
-        <div className={styles.uploadProgress}>
-          <Text style={{ marginBottom: '8px' }}>
-            Laddar upp... {Math.round(uploadProgress)}%
-          </Text>
-          <ProgressBar value={uploadProgress / 100} />
-        </div>
-      )}
-
-      {/* Preview */}
-      {previewData && !previewData.error && (
-        <Card className={styles.resultCard}>
-          <Text weight="semibold" block style={{ marginBottom: '12px' }}>
-            Förhandsvisning:
-          </Text>
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '12px' }}>
-            <Badge appearance="filled" color="brand">
-              <Folder20Regular style={{ marginRight: '4px' }} />
-              {previewData.statistics?.total_directories || 0} mappar
-            </Badge>
-            <Badge appearance="filled" color="success">
-              <Document20Regular style={{ marginRight: '4px' }} />
-              {previewData.statistics?.total_files || 0} filer
-            </Badge>
-            <Badge appearance="tint">
-              Skannad: {previewData.scan_info?.scan_date?.split('T')[0]}
-            </Badge>
-          </div>
-          
-          <div className={styles.filePreview}>
-            <strong>Root path:</strong> {previewData.scan_info?.root_path}<br/>
-            <strong>Scanner:</strong> {previewData.scan_info?.scanner} v{previewData.scan_info?.version}<br/>
-            <strong>Filtyper:</strong> {Object.entries(previewData.statistics?.file_extensions || {}).map(([ext, count]) => `${ext}: ${count}`).join(', ')}<br/>
-            <strong>Första mappar:</strong> {Object.keys(previewData.tree?.children || {}).slice(0, 5).join(', ')}
+        <Card>
+          <div className={styles.progressSection} style={{ padding: '20px' }}>
+            <ProgressBar 
+              value={uploadProgress} 
+              max={100}
+              shape="rounded"
+              thickness="large"
+            />
+            
+            <div className={styles.statusRow}>
+              {getStatusIcon()}
+              <Text size={400} weight="medium">
+                {currentStatus}
+              </Text>
+            </div>
+            
+            {detailedProgress && (
+              <div className={styles.detailedStatus}>
+                <Info24Regular />
+                <Text size={300}>
+                  {detailedProgress}
+                </Text>
+              </div>
+            )}
+            
+            <Text size={300} weight="medium">
+              {Math.round(uploadProgress)}% genomfört
+            </Text>
           </div>
         </Card>
       )}
 
       {/* Results */}
       {results.length > 0 && (
-        <div className={styles.results}>
-          <Text weight="semibold" block style={{ marginBottom: '16px' }}>
-            Resultat:
-          </Text>
+        <div className={styles.resultsSection}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <CheckmarkCircle24Regular />
+            <Text size={500} weight="semibold">
+              Resultat
+            </Text>
+          </div>
+          
           {results.map((result, index) => (
-            <Card key={index} className={styles.resultCard}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {result.status === 'success' ? (
-                  <CheckmarkCircle20Regular className={styles.success} />
-                ) : (
-                  <ErrorCircle20Regular className={styles.error} />
-                )}
+            <MessageBar
+              key={index}
+              intent={result.status === 'success' ? 'success' : 'error'}
+            >
+              <MessageBarBody>
+                <MessageBarTitle>
+                  {result.file}
+                </MessageBarTitle>
                 <div>
-                  <Text weight="semibold">{result.file}</Text>
-                  <Text block size={200}>{result.message}</Text>
+                  <Text size={300} style={{ display: 'block', marginBottom: '4px' }}>
+                    {result.message}
+                  </Text>
+                  {result.details && (
+                    <Text size={200}>
+                      {result.details}
+                    </Text>
+                  )}
                 </div>
-              </div>
-            </Card>
+              </MessageBarBody>
+            </MessageBar>
           ))}
         </div>
       )}
