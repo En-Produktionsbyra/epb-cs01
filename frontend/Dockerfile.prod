@@ -1,0 +1,33 @@
+# Multi-stage build för frontend med Vite
+FROM node:18-alpine as builder
+
+WORKDIR /app
+
+# Kopiera package files
+COPY package*.json ./
+
+# Installera dependencies
+RUN npm ci --only=production
+
+# Kopiera source code
+COPY . .
+
+# Bygg för produktion med Vite
+RUN npm run build
+
+# Production stage med nginx
+FROM nginx:alpine
+
+# Ta bort default nginx config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Kopiera custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/
+
+# Kopiera byggd Vite app (dist mapp)
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Exponera port 80
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

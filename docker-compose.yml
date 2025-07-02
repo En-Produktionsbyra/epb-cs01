@@ -1,34 +1,44 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: cold-storage-backend
-    ports:
-      - "0.0.0.0:8000:8000"  # VIKTIGT: Lyssna på alla interfaces
+    restart: unless-stopped
     volumes:
       - ./data:/app/data
-      - /Volumes:/app/disks:ro
+      - /mnt/storage:/app/disks:ro  # Justera efter din server
     environment:
       - DB_PATH=/app/data/cold_storage.db
       - PYTHONPATH=/app
-    restart: unless-stopped
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     container_name: cold-storage-frontend
-    ports:
-      - "0.0.0.0:3000:3000"  # VIKTIGT: Lyssna på alla interfaces
+    restart: unless-stopped
     environment:
-      # INGEN statisk API URL - låt JavaScript detektera automatiskt
-      - CHOKIDAR_USEPOLLING=true
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
+      - VIRTUAL_HOST=${DOMAINS}
+      - LETSENCRYPT_HOST=${DOMAINS}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+    expose:
+      - "80"
     depends_on:
       - backend
-    restart: unless-stopped
+
+networks:
+  default:
+    external:
+      name: webproxy
+
+volumes:
+  cold_storage_data:
+    driver: local
