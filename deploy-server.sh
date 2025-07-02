@@ -19,6 +19,7 @@ source .env
 
 echo "📋 Deployment info:"
 echo "   Domain: $DOMAINS"
+echo "   API Domain: api.$DOMAINS"
 echo "   Email: $LETSENCRYPT_EMAIL"
 
 # Kontrollera att webproxy network finns
@@ -60,7 +61,7 @@ fi
 echo ""
 echo "✅ Deployment klart!"
 echo "🌐 Frontend: https://$DOMAINS"
-echo "🔧 Backend API: https://$DOMAINS/api/"
+echo "🔧 Backend API: https://api.$DOMAINS"
 echo ""
 echo "📋 För att se loggar:"
 echo "   docker-compose logs -f"
