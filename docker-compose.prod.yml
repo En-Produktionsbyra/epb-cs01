@@ -1,0 +1,38 @@
+version: '2'
+
+services:
+  backend:
+    # Använd färdig image (laddad från tar-fil)
+    image: cold-storage-backend:latest
+    container_name: cold-storage-backend
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - /mnt/storage:/app/disks:ro  # Server storage path
+    environment:
+      - DB_PATH=/app/data/cold_storage.db
+      - PYTHONPATH=/app
+    expose:
+      - "8000"
+    networks:
+      - webproxy
+
+  frontend:
+    # Använd färdig image (laddad från tar-fil)
+    image: cold-storage-frontend:latest
+    container_name: cold-storage-frontend
+    restart: unless-stopped
+    environment:
+      - VIRTUAL_HOST=${DOMAINS}
+      - LETSENCRYPT_HOST=${DOMAINS}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    networks:
+      - webproxy
+
+networks:
+  webproxy:
+    external: true

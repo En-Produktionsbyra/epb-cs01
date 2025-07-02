@@ -7,6 +7,10 @@ data/
 # Node modules
 node_modules/
 
+# Build outputs (not needed since we use Docker images)
+frontend/dist/
+frontend/build/
+
 # Python cache
 __pycache__/
 *.pyc
