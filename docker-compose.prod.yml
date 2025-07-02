@@ -10,6 +10,7 @@ services:
       - ./data:/app/data
       - /mnt/storage:/app/disks:ro
     environment:
+      - DB_URL=postgresql://cold_user:cold_password@167.172.109.112:5432/cold_storage
       - DB_PATH=/app/data/cold_storage.db
       - PYTHONPATH=/app
     expose:

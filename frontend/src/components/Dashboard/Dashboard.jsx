@@ -105,15 +105,16 @@ const Dashboard = () => {
     fetchDisks();
   }, []);
 
-
-  // Sedan ändra funktionen:
   const fetchDisks = async () => {
     setLoading(true);
     try {
+      console.log('📊 Dashboard: Fetching disks...');
       const data = await getDisks(); // Använd din smarta API-funktion
+      console.log('📊 Dashboard: Received data:', data);
       setDisks(data || []);
       setError('');
     } catch (err) {
+      console.error('📊 Dashboard: Error fetching disks:', err);
       setError(err.message);
       setDisks([]); // Sätt alltid till tom array vid fel
     }
@@ -130,11 +131,17 @@ const Dashboard = () => {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'Okänt';
-    return new Date(dateString).toLocaleDateString('sv-SE');
+    try {
+      return new Date(dateString).toLocaleDateString('sv-SE');
+    } catch (e) {
+      return 'Okänt';
+    }
   };
 
-  const handleDiskClick = (diskId) => {
-    navigate(`/disks/${diskId}`);
+  // FIXAT: Använd disk.name istället för disk.disk_id
+  const handleDiskClick = (diskName) => {
+    console.log('📊 Dashboard: Navigating to disk:', diskName);
+    navigate(`/disks/${encodeURIComponent(diskName)}`);
   };
 
   if (loading) {
@@ -164,8 +171,9 @@ const Dashboard = () => {
     );
   }
 
-  const totalFiles = disks.reduce((sum, disk) => sum + (disk.file_count || 0), 0);
-  const totalSize = disks.reduce((sum, disk) => sum + (disk.total_size || 0), 0);
+  // FIXAT: Använd nya PostgreSQL fältnamn
+  const totalFiles = disks.reduce((sum, disk) => sum + (disk.actual_file_count || 0), 0);
+  const totalSize = disks.reduce((sum, disk) => sum + (disk.actual_total_size || 0), 0);
 
   return (
     <div>
@@ -215,28 +223,32 @@ const Dashboard = () => {
         <div className={styles.disksGrid}>
           {disks.map((disk) => (
             <Card 
-              key={disk.disk_id} 
+              key={disk.id} 
               className={styles.diskCard}
-              onClick={() => handleDiskClick(disk.disk_id)}
+              onClick={() => handleDiskClick(disk.name)}
             >
               <div style={{ padding: '16px' }}>
                 <div className={styles.diskHeader}>
-                  <Text weight="semibold" size={500}>{disk.disk_name}</Text>
+                  {/* FIXAT: Använd disk.name istället för disk.disk_name */}
+                  <Text weight="semibold" size={500}>{disk.name}</Text>
                 </div>
                 
                 <div className={styles.diskStats}>
                   <div className={styles.diskStat}>
                     <Document20Regular style={{ fontSize: '14px' }} />
-                    <Text size={200}>{(disk.file_count || 0).toLocaleString()}</Text>
+                    {/* FIXAT: Använd actual_file_count istället för file_count */}
+                    <Text size={200}>{(disk.actual_file_count || 0).toLocaleString()}</Text>
                   </div>
                   
                   <div className={styles.diskStat}>
                     <Database20Regular style={{ fontSize: '14px' }} />
-                    <Text size={200}>{formatFileSize(disk.total_size)}</Text>
+                    {/* FIXAT: Använd actual_total_size istället för total_size */}
+                    <Text size={200}>{formatFileSize(disk.actual_total_size)}</Text>
                   </div>
                   
                   <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
-                    {formatDate(disk.scan_date)}
+                    {/* FIXAT: Använd created_at istället för scan_date */}
+                    {formatDate(disk.created_at)}
                   </Text>
                 </div>
 
@@ -247,7 +259,7 @@ const Dashboard = () => {
                     icon={<ChevronRight20Regular />}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDiskClick(disk.disk_id);
+                      handleDiskClick(disk.name);
                     }}
                   >
                     Bläddra filer

@@ -223,6 +223,29 @@ export const fetchStats = async () => {
 };
 
 /**
+ * Kontrollera om en disk redan finns (duplicate check)
+ */
+export const checkDuplicate = async (file) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    console.log('🔍 Checking for duplicate:', file.name);
+    const response = await api.post('/upload/check-duplicate', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    console.log('✅ Duplicate check result:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Duplicate check failed:', error.message);
+    throw new Error(`Duplicate check misslyckades: ${error.message}`);
+  }
+};
+
+/**
  * Ladda upp hårddisk-paket - GAMLA SYNKRONA METODEN
  */
 export const uploadDiskPackage = async (file, onUploadProgress = null) => {
