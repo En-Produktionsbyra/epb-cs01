@@ -60,7 +60,7 @@ docker-compose -f docker-compose.prod.yml ps
 # Kontrollera hälsa
 echo "🏥 Kontrollerar backend hälsa..."
 sleep 5
-if docker-compose -f docker-compose.prod.yml exec -T backend python -c "import requests; requests.get('http://localhost:8000/')" > /dev/null 2>&1; then
+if curl -s http://localhost:8000/ > /dev/null 2>&1; then
     echo "✅ Backend är redo"
 else
     echo "⚠️ Backend svarar inte ännu, kolla loggarna"
