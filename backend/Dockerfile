@@ -1,18 +1,32 @@
-# Använd en större base image med mer dependencies förinstallerade
-FROM tiangolo/uvicorn-gunicorn-fastapi:python3.11
+# Använd äldre, stabilare Python version
+FROM python:3.10-bullseye
 
 WORKDIR /app
 
-# Kopiera endast det vi behöver
-COPY main.py /app/
-COPY database/ /app/database/
-COPY populate_directories_migration.py /app/
+# Uppdatera system och installera grundläggande dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Installera endast specifika extra dependencies som behövs
-RUN pip install --no-cache-dir aiofiles python-multipart
+# Kopiera requirements först för caching
+COPY requirements.txt .
 
-# Skapa data directory
-RUN mkdir -p /app/data
+# Installera Python dependencies med explicit versioner
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Starta FastAPI
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Kopiera applikationskod
+COPY . .
+
+# Skapa data directory med rätt permissions
+RUN mkdir -p /app/data && chmod 755 /app/data
+
+# Exponera port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# Starta med explicit Python och debugging
+CMD ["python", "-u", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
