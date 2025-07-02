@@ -566,17 +566,9 @@ def import_disk_with_progress(file_data: bytes, filename: str, task_id: str, rep
             # Originallogik: Kontrollera duplicates och lägg till suffix om nödvändigt
             existing_disk = get_disk_by_name(safe_disk_name)
             if existing_disk:
-                counter = 1
-                original_name = safe_disk_name
-                while True:
-                    new_disk_name = f"{original_name}_{counter}"
-                    if not get_disk_by_name(new_disk_name):
-                        safe_disk_name = new_disk_name
-                        break
-                    counter += 1
-                
-                tracker.update_progress("renamed", 15, f"Disk finns redan, använder: {safe_disk_name}", 
-                    f"Undviker konflikt med befintlig disk")
+                delete_disk(safe_disk_name)
+                tracker.update_progress("deleting", 18, "Tar bort befintlig disk...", 
+                    f"Raderar: {safe_disk_name} (ID: {existing_disk.id})")
         
         tracker.update_progress("preparing", 25, "Förbereder databasimport...", f"Disk namn: {safe_disk_name}")
         

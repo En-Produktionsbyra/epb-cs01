@@ -20,6 +20,7 @@ import {
   createTableColumn,
   Dropdown,
   Option,
+  SearchBox,
 } from '@fluentui/react-components';
 import {
   Search20Regular,
@@ -55,6 +56,7 @@ const useStyles = makeStyles({
   
   searchForm: {
     display: 'flex',
+    justifyContent: "center",
     gap: '12px',
     marginBottom: '16px',
     alignItems: 'end',
@@ -68,7 +70,7 @@ const useStyles = makeStyles({
   
   searchInput: {
     flex: 1,
-    maxWidth: '400px',
+    maxWidth: '1200px',
     // På mobil: full bredd
     '@media (max-width: 768px)': {
       maxWidth: '100%',
@@ -77,6 +79,7 @@ const useStyles = makeStyles({
   
   filters: {
     display: 'flex',
+    justifyContent: "center",
     gap: '12px',
     flexWrap: 'wrap',
     alignItems: 'center',
@@ -452,34 +455,30 @@ const Search = () => {
     <div className={styles.container}>
       {/* Search Header */}
       <div className={styles.searchHeader}>
-        <Text size={700} weight="bold" block style={{ marginBottom: '8px' }}>
-          <Search20Regular style={{ marginRight: '8px' }} />
-          Sök filer
-        </Text>
-        <Text>Sök efter filer, kunder, projekt eller filtyper</Text>
         
         <div className={styles.searchForm}>
-          <Input
-            className={styles.searchInput}
-            placeholder="Skriv sökterm (minst 3 tecken)..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyPress}
-            contentBefore={<Search20Regular />}
-          />
-          <Button
-            appearance="primary"
-            onClick={handleSearch}
-            disabled={!query.trim() || query.length < 3 || loading}
-            style={{
-              // På mobil: full bredd
-              '@media (max-width: 768px)': {
-                width: '100%',
-              },
-            }}
-          >
-            {loading ? 'Söker...' : 'Sök'}
-          </Button>
+          <div style={{ maxWidth: '1200px' }} >
+        <Text size={700} weight="bold" block align="center" style={{ marginBottom: '8px' }}>
+          Sök filer
+        </Text>
+        <Text block  align="center" >Sök efter filer, kunder, projekt eller filtyper</Text>
+        <SearchBox
+          className={styles.searchInput}
+          placeholder="Skriv sökterm (minst 3 tecken)..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyPress}
+          contentBefore={<Search20Regular />}
+          size="large"                   /* nya props */
+          style={{ height: '48px', fontSize: '16px' }}  /* större height/text */
+          autoFocus                   /* sätter fokus direkt */
+          clearButton                /* gör sökfältet sött med X-knapp */
+          appearance="outline"
+          onClear={() => {
+            setQuery(''); setResults([]); setHasSearched(false);
+          }}
+        />
+        </div>
         </div>
 
         {/* Filters */}
@@ -579,7 +578,6 @@ const Search = () => {
             {/* Results */}
             {results.length === 0 ? (
               <div className={styles.noResults}>
-                <Search20Regular style={{ fontSize: '48px', marginBottom: '16px' }} />
                 <Text size={500} weight="semibold" block style={{ marginBottom: '8px' }}>
                   Inga resultat hittades
                 </Text>
@@ -688,7 +686,6 @@ const Search = () => {
 
         {!hasSearched && (
           <div className={styles.noResults}>
-            <Search20Regular style={{ fontSize: '64px', marginBottom: '16px', color: tokens.colorNeutralForeground3 }} />
             <Text size={600} weight="semibold" block style={{ marginBottom: '8px' }}>
               Redo att söka
             </Text>

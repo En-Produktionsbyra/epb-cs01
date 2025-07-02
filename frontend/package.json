@@ -7,6 +7,7 @@
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.258",
     "@fluentui/react-nav": "^9.1.0",
+    "@fluentui/react-search-preview": "^0.2.0",
     "@tanstack/react-query": "^5.51.0",
     "axios": "^1.7.0",
     "date-fns": "^3.6.0",

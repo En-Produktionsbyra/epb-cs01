@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 COPY package*.json ./
 
 # Installera dependencies
-RUN npm ci --production=false --silent
+RUN npm install
 
 # Kopiera source code
 COPY . .

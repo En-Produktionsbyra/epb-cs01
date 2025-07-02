@@ -248,7 +248,7 @@ export const checkDuplicate = async (file) => {
 /**
  * Ladda upp hårddisk-paket - GAMLA SYNKRONA METODEN
  */
-export const uploadDiskPackage = async (file, onUploadProgress = null) => {
+export const Red = async (file, onUploadProgress = null) => {
   try {
     const formData = new FormData();
     formData.append('file', file);

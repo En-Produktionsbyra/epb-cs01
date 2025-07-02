@@ -121,7 +121,7 @@ const Upload = () => {
 
     try {
       // Start async upload MED replaceExisting parameter
-      const uploadResult = await uploadDiskPackageAsync(file, replaceExisting);
+const uploadResult = await uploadDiskPackageAsync(file, replaceExisting);
       console.log('📤 Upload started:', uploadResult);
       
       if (!uploadResult.task_id) {
