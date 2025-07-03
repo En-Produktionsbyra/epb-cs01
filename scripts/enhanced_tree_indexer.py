@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Optimized Tree Indexer för Cold Storage v2 - FIXED VERSION
+Optimized Tree Indexer för Cold Storage v2 - COMPLETE FIXED VERSION
 Skapar JSON-struktur som är perfekt för import till directories-tabellen
-Fixar: QR-kod generering och alfabetisk sortering av kundlista
+ALLA FIXES: Djup-begränsning, Auto-skalad text, Roterad header, Smart kundlista-filtrering
 """
 
 import os
@@ -32,11 +32,166 @@ except ImportError:
     HAS_TQDM = False
     print("⚠️ Installera 'tqdm' för progressbar: pip install tqdm")
 
+def get_text_size_global(text, font, draw_obj):
+    """Helper för att få text-dimensioner kompatibelt med olika PIL versioner"""
+    try:
+        bbox = draw_obj.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except AttributeError:
+        return draw_obj.textsize(text, font=font)
+
+def find_optimal_customer_list_font(customer_folders, max_width, max_height, draw_obj):
+    """
+    Hitta optimal font-storlek för kundlistan som maximerar användningen av tillgängligt utrymme
+    """
+    font_paths = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Arial.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]
+    
+    optimal_size = 8  # Fallback minimum
+    
+    # Testa font-storlekar från 8 till 40
+    for font_size in range(8, 41):
+        # Ladda font
+        test_font = None
+        for font_path in font_paths:
+            try:
+                test_font = ImageFont.truetype(font_path, font_size)
+                break
+            except (OSError, IOError):
+                continue
+        
+        if test_font is None:
+            test_font = ImageFont.load_default()
+        
+        # Simulera renderingen av hela listan
+        total_height_needed = simulate_customer_list_rendering(
+            customer_folders, test_font, max_width, draw_obj
+        )
+        
+        # Kontrollera om allt får plats
+        if total_height_needed <= max_height:
+            optimal_size = font_size  # Denna storlek fungerar
+        else:
+            break  # För stor, använd föregående storlek
+    
+    return optimal_size
+
+def simulate_customer_list_rendering(customer_folders, font, max_width, draw_obj):
+    """
+    Simulera renderingen av kundlistan för att beräkna total höjd
+    """
+    total_height = 0
+    line_spacing = 4  # Spacing mellan rader
+    
+    for folder in customer_folders:
+        # Formatera text
+        display_text = f"• {folder}"
+        
+        # Mät textstorleken
+        text_width, text_height = get_text_size_global(display_text, font, draw_obj)
+        
+        # Kontrollera om texten behöver brytas
+        if text_width > max_width:
+            # Beräkna hur många rader som behövs (förenklad)
+            estimated_chars_per_line = len(display_text) * (max_width / text_width)
+            estimated_lines = max(1, len(display_text) / max(1, estimated_chars_per_line))
+            text_height = text_height * estimated_lines
+        
+        total_height += text_height + line_spacing
+    
+    return total_height
+
+def render_customer_list_with_font(customer_folders, font_size, max_width, max_height, start_x, start_y, draw_obj):
+    """
+    Rendera kundlistan med given font-storlek och optimal radavstånd
+    """
+    # Ladda font
+    font_paths = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Arial.ttf", 
+        "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]
+    
+    customer_font = None
+    for font_path in font_paths:
+        try:
+            customer_font = ImageFont.truetype(font_path, font_size)
+            break
+        except (OSError, IOError):
+            continue
+    
+    if customer_font is None:
+        customer_font = ImageFont.load_default()
+    
+    # Beräkna optimal radavstånd
+    total_text_height = 0
+    text_heights = []
+    
+    # Första passet: mät alla texter
+    for folder in customer_folders:
+        display_text = f"• {folder}"
+        _, text_height = get_text_size_global(display_text, customer_font, draw_obj)
+        text_heights.append(text_height)
+        total_text_height += text_height
+    
+    # Beräkna spacing för att fylla hela höjden optimalt
+    if len(customer_folders) > 1:
+        available_spacing = max_height - total_text_height
+        optimal_line_spacing = max(2, available_spacing / (len(customer_folders) - 1))
+    else:
+        optimal_line_spacing = 4
+    
+    print(f"📊 Kundlista rendering: {len(customer_folders)} rader, radavstånd: {optimal_line_spacing:.1f}px")
+    
+    # Andra passet: rendera texterna
+    current_y = start_y
+    rendered_count = 0
+    
+    for i, folder in enumerate(customer_folders):
+        # Kontrollera om vi har plats kvar
+        if current_y + text_heights[i] > start_y + max_height:
+            print(f"🛑 Kundlista trunkerad vid {rendered_count}/{len(customer_folders)} mappar")
+            break
+        
+        # Förkorta text om nödvändigt för att få plats i bredd
+        display_text = f"• {folder}"
+        text_width = get_text_size_global(display_text, customer_font, draw_obj)[0]
+        
+        if text_width > max_width:
+            # Förkorta iterativt
+            shortened_folder = folder
+            while len(shortened_folder) > 5:
+                test_text = f"• {shortened_folder}..."
+                if get_text_size_global(test_text, customer_font, draw_obj)[0] <= max_width:
+                    display_text = test_text
+                    break
+                shortened_folder = shortened_folder[:-1]
+        
+        # Rita texten
+        draw_obj.text((start_x, current_y), display_text, fill='black', font=customer_font)
+        
+        current_y += text_heights[i] + optimal_line_spacing
+        rendered_count += 1
+        
+        # Debug varje 20:e rad
+        if rendered_count % 20 == 0:
+            remaining_height = (start_y + max_height) - current_y
+            print(f"📍 Kundlista: {rendered_count}/{len(customer_folders)}, höjd kvar: {remaining_height:.0f}px")
+    
+    final_fill_percentage = (current_y - start_y) / max_height * 100
+    print(f"🏁 Kundlista slutförd: {rendered_count}/{len(customer_folders)} mappar, {final_fill_percentage:.1f}% fyllning")
+
 class OptimizedTreeIndexer:
-    def __init__(self):
-        self.version = "2.1.1"  # Uppdaterad version
+    def __init__(self, max_depth=8):
+        self.version = "2.3.0"  # Uppdaterad version med alla fixes
         self.checkpoint_file = None
         self.progress_bar = None
+        self.max_depth = max_depth  # DJUP-BEGRÄNSNING
         
     def determine_file_type(self, extension: str) -> str:
         """Bestäm fil-kategori baserat på extension"""
@@ -74,6 +229,28 @@ class OptimizedTreeIndexer:
         
         else:
             return 'other'
+    
+    def _should_exclude_directory(self, dir_path: str, root_path: str, exclude_regexes: List) -> bool:
+        """Gemensam logik för om en mapp ska exkluderas"""
+        
+        # Nivå 0 filtrering - exkludera problematiska root-mappar
+        if dir_path == root_path or os.path.dirname(dir_path) == root_path:
+            folder_name = os.path.basename(dir_path)
+            excluded_root_folders = [
+                'Backups.backupdb',
+                '.Spotlight-V100', 
+                '.TemporaryItems',
+                '.Trashes',
+                '.fseventsd'
+            ]
+            if folder_name in excluded_root_folders:
+                return True
+        
+        # Regex-filtrering
+        if any(regex.search(dir_path) for regex in exclude_regexes):
+            return True
+        
+        return False
         
     def scan_directory_tree(self, root_path: str, output_file: str = None, 
                            include_extensions: List[str] = None,
@@ -81,7 +258,7 @@ class OptimizedTreeIndexer:
                            resume: bool = True,
                            checkpoint_interval: int = 1000) -> Dict:
         """
-        Scanna katalogträd optimerat för Cold Storage v2
+        Scanna katalogträd optimerat för Cold Storage v2 med djup-begränsning
         """
         
         if not os.path.exists(root_path):
@@ -99,6 +276,7 @@ class OptimizedTreeIndexer:
         print(f"📂 Skannar: {root_path}")
         print(f"💾 Output: {output_file}")
         print(f"🔄 Checkpoint: {self.checkpoint_file}")
+        print(f"📏 Max djup: {self.max_depth} nivåer")
         print(f"⏰ Starttid: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Default file extensions (bred täckning för foto/video-arkiv)
@@ -123,13 +301,10 @@ class OptimizedTreeIndexer:
                 r'Thumbs\.db$', 
                 r'\.tmp$',
                 r'\.temp$',
-                r'/\.',  # Dolda mappar
                 r'__MACOSX',
                 r'System Volume Information',
                 r'\$RECYCLE\.BIN',
-                r'\.Spotlight-V100',
-                r'\.Trashes',
-                r'\.fseventsd'
+                r'\.VolumeIcon'
             ]
         
         # Kompilera exclude patterns
@@ -216,6 +391,7 @@ class OptimizedTreeIndexer:
                 'scan_date': datetime.now().isoformat(),
                 'scanner': 'OptimizedTreeIndexer',
                 'version': self.version,
+                'max_depth': self.max_depth,
                 'include_extensions': include_extensions,
                 'exclude_patterns': exclude_patterns,
                 'optimized_for': 'Cold Storage v2 with directories table'
@@ -257,13 +433,13 @@ class OptimizedTreeIndexer:
                             include_extensions: List[str], exclude_regexes: List,
                             checkpoint_interval: int):
         """
-        Scanna katalogträd nivå för nivå med progressbar
+        Scanna katalogträd nivå för nivå med progressbar och djup-begränsning
         """
         
         # Första: räkna totalt antal kataloger för progressbar
         print("🔢 Räknar totalt antal kataloger...")
         total_dirs = self._count_total_directories(root_path, exclude_regexes)
-        print(f"📊 Totalt {total_dirs:,} kataloger att processa")
+        print(f"📊 Totalt {total_dirs:,} kataloger att processa (max djup: {self.max_depth})")
         
         # Skapa progressbar
         if HAS_TQDM:
@@ -285,8 +461,20 @@ class OptimizedTreeIndexer:
             while current_level:
                 dir_path, tree_node, depth, relative_path = current_level.popleft()
                 
+                # DJUP-BEGRÄNSNING
+                if depth > self.max_depth:
+                    if HAS_TQDM and self.progress_bar:
+                        self.progress_bar.update(1)
+                    continue
+                
                 # Hoppa över om redan processad
                 if dir_path in processed_paths:
+                    if HAS_TQDM and self.progress_bar:
+                        self.progress_bar.update(1)
+                    continue
+                
+                # Hoppa över exkluderade mappar
+                if self._should_exclude_directory(dir_path, root_path, exclude_regexes):
                     if HAS_TQDM and self.progress_bar:
                         self.progress_bar.update(1)
                     continue
@@ -319,31 +507,38 @@ class OptimizedTreeIndexer:
             current_level = next_level
     
     def _count_total_directories(self, root_path: str, exclude_regexes: List) -> int:
-        """Räkna totalt antal kataloger (för progressbar)"""
+        """Räkna totalt antal kataloger (för progressbar) med djup-begränsning"""
         
         total = 0
-        stack = [root_path]
+        # Använd en stack med djup-information: (path, depth)
+        stack = [(root_path, 0)]
         
         while stack:
-            current_path = stack.pop()
+            current_path, current_depth = stack.pop()
             
-            # Kontrollera exclude patterns
-            if any(regex.search(current_path) for regex in exclude_regexes):
+            # DJUP-BEGRÄNSNING
+            if current_depth > self.max_depth:
+                continue
+            
+            # Exkludering
+            if self._should_exclude_directory(current_path, root_path, exclude_regexes):
                 continue
             
             try:
                 items = os.listdir(current_path)
                 total += 1
                 
-                for item in items:
-                    item_path = os.path.join(current_path, item)
-                    
-                    if any(regex.search(item_path) for regex in exclude_regexes):
-                        continue
-                    
-                    if os.path.isdir(item_path):
-                        stack.append(item_path)
+                # Lägg bara till underkataloger om vi inte är för djupt
+                if current_depth < self.max_depth:
+                    for item in items:
+                        item_path = os.path.join(current_path, item)
                         
+                        if self._should_exclude_directory(item_path, root_path, exclude_regexes):
+                            continue
+                        
+                        if os.path.isdir(item_path):
+                            stack.append((item_path, current_depth + 1))
+                            
             except (PermissionError, OSError):
                 total += 1
                 continue
@@ -354,8 +549,12 @@ class OptimizedTreeIndexer:
                           include_extensions: List[str], exclude_regexes: List,
                           statistics: Dict, next_level: deque):
         """
-        Processa en enskild katalog med optimerad metadata
+        Processa en enskild katalog med optimerad metadata och djup-begränsning
         """
+        
+        # DJUP-BEGRÄNSNING
+        if depth > self.max_depth:
+            return
         
         # Uppdatera max djup och djup-fördelning
         statistics['max_depth'] = max(statistics['max_depth'], depth)
@@ -387,6 +586,10 @@ class OptimizedTreeIndexer:
                 continue
             
             if os.path.isdir(item_path):
+                # Hoppa över om vi når max djup
+                if depth >= self.max_depth:
+                    continue
+                    
                 # Skapa mapp-nod med optimerad struktur
                 child_relative_path = f"{relative_path}/{item}" if relative_path else item
                 
@@ -511,17 +714,61 @@ class OptimizedTreeIndexer:
     
     def ask_for_customer_level(self, tree: Dict, max_attempts: int = 4) -> List[str]:
         """
-        Interaktivt hitta rätt nivå för kundmappar
+        Interaktivt hitta rätt nivå för kundmappar med KORREKT filtrering
         """
         if not sys.stdin.isatty():
             print("⚠️ Inte en interaktiv terminal - hoppar över kundmapp-detektering")
             return []
         
         def get_folders_at_level(node, current_level, target_level):
-            """Hämta alla mappar på en specifik nivå"""
+            """Hämta alla mappar på en specifik nivå och filtrera systemfiler"""
             if current_level == target_level:
-                return list(node.get('children', {}).keys())
+                all_folders = list(node.get('children', {}).keys())
+                
+                # SYSTEMFILER ATT FILTRERA BORT
+                system_folders = {
+                    '.fseventsd', 
+                    '.Spotlight-V100', 
+                    '.TemporaryItems', 
+                    '.Trashes',
+                    'Backups.backupdb',
+                    '.DS_Store',
+                    '.VolumeIcon.icns',
+                    '.disk_label',
+                    '.disk_label_2x',
+                    '.hedge-enabled',
+                    '__MACOSX',
+                    'System Volume Information',
+                    '$RECYCLE.BIN',
+                    'Thumbs.db'
+                }
+                
+                # Filtrera bort systemfiler och dolda mappar
+                filtered_folders = []
+                for folder in all_folders:
+                    # Hoppa över exakta systemfiler
+                    if folder in system_folders:
+                        print(f"   🚫 Filtrerar bort systemfil: {folder}")
+                        continue
+                    
+                    # Hoppa över alla dolda filer/mappar (börjar med punkt)
+                    if folder.startswith('.'):
+                        print(f"   🚫 Filtrerar bort dold mapp: {folder}")
+                        continue
+                    
+                    # Hoppa över mycket korta namn (troligen systemfiler)
+                    if len(folder) <= 2:
+                        print(f"   🚫 Filtrerar bort kort namn: {folder}")
+                        continue
+                    
+                    # DENNA ÄR FÖRMODLIGEN EN RIKTIG KUNDMAPP
+                    filtered_folders.append(folder)
+                    print(f"   ✅ Behåller: {folder}")
+                
+                print(f"📊 Filtrering: {len(all_folders)} totalt → {len(filtered_folders)} efter filtrering")
+                return filtered_folders
             
+            # För djupare nivåer - rekursiv sökning
             folders = []
             for child in node.get('children', {}).values():
                 folders.extend(get_folders_at_level(child, current_level + 1, target_level))
@@ -531,30 +778,32 @@ class OptimizedTreeIndexer:
         print("Låt oss hitta rätt nivå för dina kundmappar...")
         
         for level in range(max_attempts):
+            print(f"\n🔍 Analyserar nivå {level}...")
             folders = get_folders_at_level(tree, 0, level)
             
             if not folders:
-                print(f"📁 Nivå {level}: Inga mappar hittades")
+                print(f"📁 Nivå {level}: Inga relevanta mappar hittades efter filtrering")
                 continue
             
-            print(f"\n📁 Nivå {level} innehåller {len(folders)} mappar:")
+            print(f"\n📁 Nivå {level} innehåller {len(folders)} relevanta mappar:")
             
-            # Visa första 10 mappar
-            display_folders = folders[:10]
+            # Visa mappar (max 15 för läsbarhet)
+            display_folders = folders[:15]
             for i, folder in enumerate(display_folders, 1):
                 print(f"   {i:2d}. {folder}")
             
-            if len(folders) > 10:
-                print(f"   ... och {len(folders) - 10} till")
+            if len(folders) > 15:
+                print(f"   ... och {len(folders) - 15} till")
             
             # Fråga användaren
             while True:
-                response = input(f"\n❓ Är nivå {level} din grundnivå för kunder? (j/n/skip): ").lower().strip()
+                response = input(f"\n❓ Är nivå {level} din grundnivå för kunder/projekt? (j/n/skip): ").lower().strip()
                 
                 if response in ['j', 'ja', 'y', 'yes']:
                     print(f"✅ Använder nivå {level} som kundnivå")
-                    # SORTERA ALFABETISKT innan returnering - FIX #1
+                    # SORTERA ALFABETISKT innan returnering
                     sorted_folders = sorted(folders, key=str.lower)
+                    print(f"📋 Returnerar {len(sorted_folders)} kundmappar")
                     return sorted_folders
                 elif response in ['n', 'nej', 'no']:
                     print(f"➡️ Fortsätter till nästa nivå...")
@@ -570,14 +819,12 @@ class OptimizedTreeIndexer:
     
     def generate_disk_label(self, disk_name: str, tree_data: Dict, output_file: str, safe_name: str) -> str:
         """
-        Generera en 50x80mm label med QR-kod och kundlista - FIXED VERSION
+        Generera labels med KORREKT auto-skalning och header-layout
         """
         print(f"🏷️ Startar label-generering för: '{disk_name}'")
         
-        # Kontrollera dependencies
         if not HAS_LABEL_SUPPORT:
             print(f"❌ QR-kod/PIL moduler saknas")
-            print("💡 Installera: pip install qrcode[pil] pillow")
             return None
         
         try:
@@ -588,257 +835,163 @@ class OptimizedTreeIndexer:
             print(f"❌ Import-fel: {e}")
             return None
         
-        # Dimensioner för 50x80mm vid 300 DPI (stående format)
+        # === MAIN LABEL (50x80mm) ===
         width_mm, height_mm = 50, 80
         dpi = 900
         width_px = int(width_mm * dpi / 25.4)
         height_px = int(height_mm * dpi / 25.4)
         
-        print(f"📏 Label-storlek: {width_px}x{height_px} pixels ({width_mm}x{height_mm}mm)")
+        print(f"📏 Main Label: {width_px}x{height_px} pixels ({width_mm}x{height_mm}mm)")
         
-        # Skapa bild
         img = Image.new('RGB', (width_px, height_px), 'white')
-        header = Image.new('RGB', (height_px, int(width_px / 3)), 'white')
         draw = ImageDraw.Draw(img)
-        drawHeader = ImageDraw.Draw(header)
-        print("✅ Grundbild skapad")
         
-        # Marginaler
-        margin = 10
+        margin = 30
         content_width = width_px - (2 * margin)
         
-        # Försök ladda font med olika storlekar
-        def load_fonts():
-            font_paths = [
-                "/System/Library/Fonts/Helvetica.ttc",  # macOS
-                "/System/Library/Fonts/Arial.ttf",      # macOS fallback
-                "C:/Windows/Fonts/arial.ttf",           # Windows
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Linux
-            ]
-            
-            fonts = {}
-            for size_name, base_size in [('header', 250), ('title', 32*3), ('text', 20*3), ('small', 16*3), ('tiny', 14*3)]:
-                font_loaded = False
-                for path in font_paths:
-                    try:
-                        fonts[size_name] = ImageFont.truetype(path, base_size)
-                        font_loaded = True
-                        break
-                    except (OSError, IOError):
-                        continue
-                
-                if not font_loaded:
-                    fonts[size_name] = ImageFont.load_default()
-            
-            return fonts
+        # Font paths
+        font_paths = [
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Arial.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ]
         
-        fonts = load_fonts()
-        print("✅ Fonts laddade")
-        
-        # Helper funktion för att få text-dimensioner
         def get_text_size(text, font):
             try:
                 bbox = draw.textbbox((0, 0), text, font=font)
                 return bbox[2] - bbox[0], bbox[3] - bbox[1]
             except:
-                # Fallback för äldre PIL versioner
                 return draw.textsize(text, font)
         
-        # 1. Rita rubrik (disk-namn) - anpassa längd automatiskt
+        # === AUTO-SKALAD HUVUDRUBRIK (INTE TRUNKERAD!) ===
         current_y = margin
-        display_name = disk_name
+        qr_size = 250  # Fast QR-storlek
+        text_padding = 30
+        available_text_width = width_px - qr_size - text_padding - (margin * 2)
+        available_text_height = 120
         
-        # Hitta passande rubrik-storlek
-        title_font = fonts['title']
-        header_font = fonts['header']
-        while len(display_name) > 0:
-            text_width, text_height = get_text_size(display_name, title_font)
-            if text_width <= content_width:
+        print(f"🔍 Auto-skalar rubrik: '{disk_name}' i {available_text_width}x{available_text_height}px")
+        
+        # KORREKT AUTO-SKALNING - INGEN TRUNKERING
+        optimal_font = None
+        final_text_size = None
+        
+        for font_size in range(120, 7, -2):  # Från 120px ner till 8px
+            font_loaded = False
+            for font_path in font_paths:
+                try:
+                    test_font = ImageFont.truetype(font_path, font_size)
+                    font_loaded = True
+                    break
+                except (OSError, IOError):
+                    continue
+            
+            if not font_loaded:
+                test_font = ImageFont.load_default()
+            
+            # Mät HELA disk-namnet (ingen trunkering)
+            text_width, text_height = get_text_size(disk_name, test_font)
+            
+            if text_width <= available_text_width and text_height <= available_text_height:
+                optimal_font = test_font
+                final_text_size = (text_width, text_height)
+                print(f"✅ Optimal rubrik-font: {font_size}px för HELA namnet")
                 break
-            # Förkorta texten
-            display_name = display_name[:-1]
         
-        if len(display_name) < len(disk_name):
-            display_name = display_name.rstrip() + "..."
+        if optimal_font is None:
+            optimal_font = ImageFont.load_default()
+            final_text_size = get_text_size(disk_name, optimal_font)
+            print("⚠️ Använder fallback font för rubrik")
         
-        # Centrera rubrik
-        text_width, text_height = get_text_size(display_name, title_font)
-        title_x = (width_px - text_width) // 2
-        draw.text((title_x, current_y), display_name, fill='black', font=title_font)
-        drawHeader.text((30, 180), display_name, fill='black', font=header_font)
-        current_y += text_height + 30
-        print(f"✅ Rubrik ritad: '{display_name}'")
+        # Rita HELA disk-namnet (auto-skalat)
+        text_x = margin
+        text_y = current_y + (available_text_height - final_text_size[1]) // 2
+        draw.text((text_x, text_y), disk_name, fill='black', font=optimal_font)
         
-        # 2. Generera och placera QR-kod - FIX #2: Sätt storlek INNAN QR-kod generering
-        qr_max_size = min(content_width // 3, 70)  # FLYTTA DENNA RAD UPP!
+        print(f"✅ Auto-skalad rubrik: '{disk_name}' ({final_text_size[0]}x{final_text_size[1]}px)")
         
-        qr_y = current_y  # Spara QR-kodens startposition
+        current_y += available_text_height + 20
+        
+        # === QR-KOD FÖR MAIN LABEL ===
         try:
             qr_url = f"https://coldstorage.enproduktionsbyra.se/disks/{safe_name}"
-            print(f"🔗 Skapar QR-kod för: {qr_url}")
-            
-            qr = qrcode.QRCode(
-                version=1,
-                error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=3,  # Mindre box_size för att spara plats
-                border=1,
-            )
+            qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=3, border=1)
             qr.add_data(qr_url)
             qr.make(fit=True)
             
             qr_img = qr.make_image(fill_color="black", back_color="white")
+            qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
             
-            # Skala QR-koden till rätt storlek
-            qr_img = qr_img.resize((750, 750), Image.Resampling.LANCZOS)
-            
-            # Placera QR-kod i övre högra hörnet
-            qr_x = width_px - 750 - margin
+            qr_x = width_px - qr_size - margin
+            qr_y = margin
             img.paste(qr_img, (qr_x, qr_y))
-
-            qr_x = height_px - int(width_px / 3) + 30
-            qr_img = qr_img.resize((int(width_px / 3) - 60, int(width_px / 3)- 60), Image.Resampling.LANCZOS)
-            header.paste(qr_img, (qr_x, 30))
             
-            print(f"✅ QR-kod placerad ({qr_max_size}x{qr_max_size}px)")
-            
-            # Sätt text-start i höjd med QR-koden
-            text_start_y = qr_y
-                
+            print(f"✅ Main QR-kod: {qr_size}x{qr_size}px")
         except Exception as e:
-            print(f"❌ Fel vid QR-kod generering: {e}")
-            text_start_y = current_y
+            print(f"❌ QR-kod fel: {e}")
         
-        # 3. Hitta kundmappar
+        # === SMART KUNDLISTA (BARA RIKTIGA MAPPAR) ===
         try:
             customer_folders = self.ask_for_customer_level(tree_data['tree'])
-            print(f"📁 Hittade {len(customer_folders)} kundmappar")
+            
+            # EXTRA SÄKERHET: Dubbelkolla att inga systemfiler kom igenom
+            if customer_folders:
+                system_folders = {
+                    '.fseventsd', '.Spotlight-V100', '.TemporaryItems', '.Trashes',
+                    'Backups.backupdb', '.DS_Store', '.VolumeIcon.icns', '.disk_label',
+                    '.disk_label_2x', '.hedge-enabled'
+                }
+                
+                before_count = len(customer_folders)
+                customer_folders = [f for f in customer_folders 
+                                  if f not in system_folders and not f.startswith('.')]
+                customer_folders = sorted(customer_folders, key=str.lower)
+                after_count = len(customer_folders)
+                
+                if before_count != after_count:
+                    print(f"🔧 Extra filtrering: {before_count} → {after_count} mappar")
+                
+                print(f"📁 Slutgiltiga kundmappar: {customer_folders}")
+                
         except Exception as e:
-            print(f"⚠️ Fel vid kundmapp-detektering: {e}")
+            print(f"⚠️ Kundmapp-fel: {e}")
             customer_folders = []
         
-        # 4. Rita innehåll (kundlista eller statistik) - MAXIMAL BREDD OCH HÖJD
         if customer_folders:
-            # Börja texten i höjd med QR-koden (inte under den!)
-            current_y = text_start_y
+            text_max_width = available_text_width
             
-            # Beräkna maximal textbredd - QR-koden tar ca 1/3, så vi kan använda 2/3
-            qr_max_size = min(content_width // 3, 70)
-            text_max_width = width_px - qr_max_size - (margin * 2) - 10  # Extra marginal från QR-kod
-            print(f"📏 Textbredd: {text_max_width}px (QR-kod: {qr_max_size}px)")
+            # Kundlista rubrik
+            list_header = "Kunder/Projekt:"
+            try:
+                header_font = ImageFont.truetype(font_paths[0], 48)
+            except:
+                header_font = ImageFont.load_default()
             
-            # Rita kundlista rubrik på vänstra sidan bredvid QR-koden
-            draw.text((margin, current_y), "Kunder/Projekt:", fill='black', font=fonts['text'])
-            current_y += get_text_size("Kunder/Projekt:", fonts['text'])[1] + 5
+            draw.text((margin, current_y), list_header, fill='black', font=header_font)
+            header_height = get_text_size(list_header, header_font)[1]
+            current_y += header_height + 10
             
-            # Nu har vi HELA resten av bilden att fylla!
+            # Tillgänglig höjd för kundlista
             total_available_height = height_px - current_y - margin
-            print(f"🎯 MAXIMAL tillgänglig höjd: {total_available_height}px (från y={current_y} till y={height_px-margin})")
             
-            # Räkna först hur många mappar vi har totalt
-            total_folders = len(customer_folders)
-            print(f"📊 Ska fördela {total_folders} mappar på {total_available_height}px")
-            
-            # Beräkna optimal radavstånd för att fylla EXAKT hela höjden
-            if total_folders > 0:
-                optimal_line_height = total_available_height / total_folders
-                # Men inte mindre än 8px per rad (annars blir det oläsligt)
-                actual_line_height = max(8, int(optimal_line_height))
-            else:
-                actual_line_height = 15
-            
-            print(f"📏 Beräknad radavstånd: {optimal_line_height:.1f}px, använd: {actual_line_height}px")
-            
-            # Välj font-storlek baserat på radavstånd
-            if actual_line_height >= 18:
-                customer_font = fonts['small']  # 16pt - stor font
-            elif actual_line_height >= 14:
-                customer_font = fonts['tiny']   # 14pt - medel font  
-            else:
-                customer_font = ImageFont.load_default()  # Minsta font
-            
-            print(f"✅ Vald font för radavstånd {actual_line_height}px")
-            
-            customers_shown = 0
-            
-            # Rita ALLA mappar med samma font och radavstånd - VERKLIGEN ALLA!
-            for folder in customer_folders:
-                # Mjukare kontroll - bara se till att texten inte går utanför bilden
-                if current_y > height_px - margin - 8:  # Lämna bara 8px marginal
-                    print(f"🛑 VERKLIG STOPP vid y={current_y}, hade planerat {actual_line_height}px radavstånd")
-                    break
+            if total_available_height > 0:
+                optimal_customer_font_size = find_optimal_customer_list_font(
+                    customer_folders, text_max_width, total_available_height, draw
+                )
                 
-                # INGEN TRUNKERING - använd full bredd!
-                # Testa om hela namnet får plats
-                full_text = f"• {folder}"
-                text_width = get_text_size(full_text, customer_font)[0]
-                
-                if text_width <= text_max_width:
-                    # Hela namnet får plats!
-                    display_text = full_text
-                else:
-                    # Bara om det verkligen inte får plats, förkorta minimalt
-                    display_folder = folder
-                    while len(display_folder) > 5:
-                        test_text = f"• {display_folder}..."
-                        if get_text_size(test_text, customer_font)[0] <= text_max_width:
-                            break
-                        display_folder = display_folder[:-1]
-                    display_text = f"• {display_folder}..."
-                
-                # Rita mappen
-                draw.text((margin, current_y), display_text, fill='black', font=customer_font)
-                
-                # Dynamisk radavstånd - använd mindre space om vi börjar få ont om plats
-                remaining_folders = len(customer_folders) - customers_shown - 1
-                remaining_height = height_px - margin - current_y - 8
-                
-                if remaining_folders > 0 and remaining_height > 0:
-                    # Anpassa radavståndet för att få plats med resten
-                    dynamic_line_height = min(actual_line_height, remaining_height // remaining_folders)
-                    dynamic_line_height = max(6, dynamic_line_height)  # Minst 6px
-                    current_y += dynamic_line_height
-                else:
-                    current_y += actual_line_height
-                
-                customers_shown += 1
-                
-                # Debug varje 15:e rad
-                if customers_shown % 15 == 0:
-                    remaining = height_px - margin - current_y
-                    print(f"📍 Rad {customers_shown}/{len(customer_folders)}: y={current_y}, kvar={remaining}px")
-            
-            final_remaining = height_px - margin - current_y
-            print(f"🏁 FÖRSTA OMGÅNGEN: {customers_shown}/{total_folders} mappar, {final_remaining}px outnyttjat")
-            
-            # Om vi FORTFARANDE har mappar kvar, pressa in dem med minimal spacing
-            if customers_shown < total_folders:
-                print(f"🚨 FORTFARANDE {total_folders - customers_shown} mappar kvar! Pressar in dem...")
-                
-                micro_font = ImageFont.load_default()
-                minimal_spacing = 6  # Absolut minimum
-                
-                for folder in customer_folders[customers_shown:]:
-                    # Hårdare kontroll - verkligen sista pixlarna
-                    if current_y + minimal_spacing > height_px - margin:
-                        print(f"💀 ABSOLUT STOPP vid mapp {customers_shown}: '{folder}'")
-                        break
-                    
-                    # Kortare namn för att få plats
-                    short_text = f"• {folder[:20]}..." if len(folder) > 20 else f"• {folder}"
-                    
-                    draw.text((margin, current_y), short_text, fill='black', font=micro_font)
-                    current_y += minimal_spacing
-                    customers_shown += 1
-                
-                super_final_remaining = height_px - margin - current_y
-                print(f"💪 SUPERKAMP: {customers_shown}/{total_folders} mappar, {super_final_remaining}px kvar")
-            
+                render_customer_list_with_font(
+                    customer_folders, optimal_customer_font_size, text_max_width,
+                    total_available_height, margin, current_y, draw
+                )
         else:
             # Rita disk-statistik istället
             stats = tree_data['statistics']
             
-            current_y = draw_wrapped_text("Innehåll:", margin, current_y, 
-                                         content_width, fonts['text'])
+            current_y = self.draw_wrapped_text("Innehåll:", margin, current_y, 
+                                             content_width, 
+                                             ImageFont.truetype(font_paths[0], 48) if font_paths else ImageFont.load_default(), 
+                                             draw)
             current_y += 5
             
             # Statistik-rader
@@ -855,33 +1008,144 @@ class OptimizedTreeIndexer:
                 stat_lines.append(f"🔝 {top_type[0]}: {top_type[1]:,}")
             
             for stat_line in stat_lines:
-                if current_y + get_text_size(stat_line, fonts['small'])[1] > height_px - margin:
+                try:
+                    small_font = ImageFont.truetype(font_paths[0], 36)
+                except:
+                    small_font = ImageFont.load_default()
+                    
+                if current_y + get_text_size(stat_line, small_font)[1] > height_px - margin:
                     break
-                current_y = draw_wrapped_text(stat_line, margin + 5, current_y,
-                                             content_width, fonts['small'])
+                current_y = self.draw_wrapped_text(stat_line, margin + 5, current_y,
+                                                 content_width, small_font, draw)
                 current_y += 3
             
             print("✅ Disk-statistik ritad")
         
-        # 5. Spara label
+        # === HEADER LABEL (KORREKT 50x80mm med rätt layout) ===
+        
+        # SAMMA storlek som main label (50x80mm)
+        header = Image.new('RGB', (width_px, height_px), 'white')
+        drawHeader = ImageDraw.Draw(header)
+        
+        print(f"📏 Header Label: {width_px}x{height_px} pixels (KORREKT 50x80mm)")
+        
+        header_margin = 30
+        header_content_height = 150  # Begränsa innehållet till övre delen
+        
+        # === HEADER QR-KOD (högerjusterad, överkant) ===
+        header_qr_size = 120
         try:
+            qr_header = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=2, border=1)
+            qr_header.add_data(qr_url)
+            qr_header.make(fit=True)
+            
+            qr_header_img = qr_header.make_image(fill_color="black", back_color="white")
+            qr_header_img = qr_header_img.resize((header_qr_size, header_qr_size), Image.Resampling.LANCZOS)
+            
+            # Högerjusterad i överkant
+            header_qr_x = width_px - header_qr_size - header_margin
+            header_qr_y = header_margin
+            header.paste(qr_header_img, (header_qr_x, header_qr_y))
+            
+            print(f"✅ Header QR-kod: {header_qr_size}x{header_qr_size}px (högerjusterad)")
+        except Exception as e:
+            print(f"❌ Header QR-kod fel: {e}")
+            header_qr_size = 0
+        
+        # === HEADER TEXT (vänsterjusterad, överkant, auto-skalad) ===
+        header_text_width = width_px - header_qr_size - (header_margin * 3)
+        header_text_height = header_content_height
+        
+        print(f"🔍 Auto-skalar header-text i {header_text_width}x{header_text_height}px")
+        
+        # Auto-skala header-text
+        header_optimal_font = None
+        for font_size in range(80, 5, -2):
+            font_loaded = False
+            for font_path in font_paths:
+                try:
+                    test_font = ImageFont.truetype(font_path, font_size)
+                    font_loaded = True
+                    break
+                except (OSError, IOError):
+                    continue
+            
+            if not font_loaded:
+                test_font = ImageFont.load_default()
+            
+            # Mät HELA disk-namnet för header
+            text_width, text_height = get_text_size(disk_name, test_font)
+            
+            if text_width <= header_text_width and text_height <= header_text_height:
+                header_optimal_font = test_font
+                
+                # Vänsterjusterad, centrerad vertikalt inom content-området
+                header_text_x = header_margin
+                header_text_y = header_margin + (header_content_height - text_height) // 2
+                drawHeader.text((header_text_x, header_text_y), disk_name, fill='black', font=header_optimal_font)
+                
+                print(f"✅ Header text: {font_size}px (vänsterjusterad)")
+                break
+        
+        # Rotera header 90 grader för utskrift
+        header_rotated = header.rotate(-90, expand=True)
+        print("✅ Header roterad 90° för utskrift")
+        
+        # === SPARA BÅDA LABELS ===
+        try:
+            # Main label
             label_file = output_file.replace('.json', '_label.jpg')
-            img.save(label_file, 'JPEG', dpi=(dpi, dpi), quality=100, speed=0, compress_level=0)
+            img.save(label_file, 'JPEG', dpi=(dpi, dpi), quality=100)
+            
+            # Roterad header
             label_file_header = output_file.replace('.json', '_label_header.jpg')
-            header.save(label_file_header, 'JPEG', dpi=(dpi, dpi), quality=100, speed=0, compress_level=0)
+            header_rotated.save(label_file_header, 'JPEG', dpi=(dpi, dpi), quality=100)
             
             if os.path.exists(label_file):
-                file_size = os.path.getsize(label_file)
-                print(f"✅ Label sparad: {label_file}")
-                print(f"📏 Storlek: {width_mm}x{height_mm}mm ({width_px}x{height_px}px, {file_size:,} bytes)")
-                return label_file
-            else:
-                print(f"❌ Label-fil skapades inte: {label_file}")
-                return None
-                
+                print(f"✅ Main label: {label_file}")
+            
+            if os.path.exists(label_file_header):
+                print(f"✅ Header label: {label_file_header} (roterad)")
+            
+            return label_file
+            
         except Exception as e:
-            print(f"❌ Fel vid sparning av label: {e}")
+            print(f"❌ Sparning fel: {e}")
             return None
+    
+    def draw_wrapped_text(self, text, x, y, max_width, font, draw, color="black", line_spacing=1.2):
+        """
+        Rita text med automatisk radbrytning
+        """
+        words = text.split(' ')
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            line_width = bbox[2] - bbox[0]
+            
+            if line_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    lines.append(word)
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        current_y = y
+        for line in lines:
+            draw.text((x, current_y), line, font=font, fill=color)
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_height = bbox[3] - bbox[1]
+            current_y += int(line_height * line_spacing)
+        
+        return current_y
     
     def _save_tree_data(self, tree_data: Dict, output_file: str):
         """Spara träd-data till fil"""
@@ -912,19 +1176,17 @@ def main():
     parser.add_argument('--foto-only', action='store_true', help='Bara foto/video-filer')
     parser.add_argument('--no-resume', action='store_true', help='Starta från början (ignorera checkpoint)')
     parser.add_argument('--checkpoint-interval', type=int, default=1000, help='Spara checkpoint var N kataloger (default: 1000)')
+    parser.add_argument('--max-depth', type=int, default=8, help='Max djup att scanna (default: 8)')
     
     args = parser.parse_args()
     
-    # Setup output files - använd disk-namn istället för timestamp
+    # Setup output files
     if not args.output:
-        # Skapa filnamn baserat på disk-namn
         disk_name = os.path.basename(args.path.rstrip('/')) or 'UnknownDisk'
-        # Rensa ogiltiga tecken för filnamn
         safe_name = re.sub(r'[^\w\-_\.]', '_', disk_name)
         output_file = f"{safe_name}.json"
     else:
         output_file = args.output
-        # NYTT: Extrahera safe_name från output_file namnet
         safe_name = os.path.basename(output_file).replace('.json', '')
         safe_name = re.sub(r'[^\w\-_\.]', '_', safe_name)
     
@@ -940,11 +1202,12 @@ def main():
     
     exclude_patterns = args.exclude or None
     
-    # Kör optimerad scanning
-    indexer = OptimizedTreeIndexer()
+    # Skapa indexer med djup-begränsning
+    indexer = OptimizedTreeIndexer(max_depth=args.max_depth)
     
     try:
         print(f"🚀 Optimized Tree Indexer för Cold Storage v2")
+        print(f"📏 Max djup: {args.max_depth} nivåer")
         if not HAS_TQDM:
             print("💡 Tips: Installera 'tqdm' för visuell progressbar: pip install tqdm")
         if not HAS_LABEL_SUPPORT and not args.no_label:
@@ -959,7 +1222,7 @@ def main():
             checkpoint_interval=args.checkpoint_interval
         )
         
-        # Generera disk-label EFTER scanning
+        # Generera disk-label efter scanning
         label_file = None
         if not args.no_label:
             if not HAS_LABEL_SUPPORT:
@@ -967,8 +1230,8 @@ def main():
                 print("   pip install qrcode[pil] pillow")
             else:
                 try:
-                    # NYTT: Använd safe_name som disk_name för konsistent namngivning
-                    disk_name = safe_name.replace('_', ' ').title()  # Gör det lite snyggare för labeln
+                    disk_name = safe_name.replace('_', ' ').title()
+                    
                     print(f"🏷️ Försöker skapa label för: {disk_name} (URL: {safe_name})")
                     
                     label_file = indexer.generate_disk_label(disk_name, tree_data, output_file, safe_name)
@@ -996,6 +1259,7 @@ def main():
         print(f"   📄 JSON: {output_file}")
         if label_file and os.path.exists(label_file):
             print(f"   🏷️  Label: {label_file}")
+            print(f"   🏷️  Header: {label_file.replace('_label.jpg', '_label_header.jpg')}")
         elif not args.no_label:
             print(f"   ⚠️  Label kunde inte skapas")
         print(f"💡 Ladda upp JSON-filen via Cold Storage web-interface")
