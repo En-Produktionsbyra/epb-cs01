@@ -70,9 +70,10 @@ const useStyles = makeStyles({
   
   searchInput: {
     flex: 1,
-    maxWidth: '1200px',
+    width: '1000px',
     // På mobil: full bredd
     '@media (max-width: 768px)': {
+      width: 'auto',
       maxWidth: '100%',
     },
   },
@@ -457,7 +458,7 @@ const Search = () => {
       <div className={styles.searchHeader}>
         
         <div className={styles.searchForm}>
-          <div style={{ maxWidth: '1200px' }} >
+          <div >
         <Text size={700} weight="bold" block align="center" style={{ marginBottom: '8px' }}>
           Sök filer
         </Text>
