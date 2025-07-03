@@ -102,7 +102,6 @@ const useStyles = makeStyles({
   
   results: {
     flex: 1,
-    overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
   },
