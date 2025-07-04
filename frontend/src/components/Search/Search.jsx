@@ -71,10 +71,10 @@ const useStyles = makeStyles({
   searchInput: {
     flex: 1,
     width: '1000px',
+    maxWidth: '100%',
     // På mobil: full bredd
     '@media (max-width: 768px)': {
-      width: 'auto',
-      maxWidth: '100%',
+      width: '100%',
     },
   },
   
@@ -338,13 +338,35 @@ const Search = () => {
   };
 
   const handleFileClick = (file) => {
-    if (file.disk_id) {
-      const path = file.file_path || '';
-      if (path) {
-        navigate(`/disks/${file.disk_id}/browse/${encodeURIComponent(path)}`);
-      } else {
-        navigate(`/disks/${file.disk_id}`);
-      }
+    console.log('🔍 Search result clicked:', file);
+    
+    // Prioritera disk_name (läsbart), fallback till disk_id
+    const diskIdentifier = file.disk_name || file.disk_id;
+    
+    if (!diskIdentifier) {
+      console.error('❌ No disk identifier found in file:', file);
+      alert('Kan inte hitta disk-information för denna fil');
+      return;
+    }
+    
+    // Navigera till FileExplorer med disk namn/id och sökväg
+    const filePath = file.file_path || file.path || '';
+    
+    console.log(`🗂️ Navigation details:`, {
+      diskIdentifier,
+      filePath,
+      filename: file.filename,
+      usingDiskName: !!file.disk_name
+    });
+    
+    if (filePath && filePath.trim() !== '') {
+      // Navigera till den specifika mappen där filen finns
+      console.log(`📁 Navigating to folder: ${diskIdentifier}, path: ${filePath}`);
+      navigate(`/disks/${encodeURIComponent(diskIdentifier)}/browse/${encodeURIComponent(filePath)}`);
+    } else {
+      // Navigera till diskens root
+      console.log(`💿 Navigating to disk root: ${diskIdentifier}`);
+      navigate(`/disks/${encodeURIComponent(diskIdentifier)}`);
     }
   };
 

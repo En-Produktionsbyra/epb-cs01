@@ -12,7 +12,7 @@ frontend/dist/
 frontend/build/
 
 # Json filer
-*.json
+scripts/*.json
 
 # Labels
 scripts/*.jpg

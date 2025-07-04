@@ -180,6 +180,70 @@ def delete_disk(name):
     finally:
         session.close()
 
+def get_disk_info(disk_id: int) -> Optional[Dict]:
+    """Hämta information om specifik hårddisk med utökad statistik"""
+    session = SessionLocal()
+    try:
+        # Hämta hårddisk-info
+        disk = session.query(DiskIndex).filter(DiskIndex.id == disk_id).first()
+        
+        if not disk:
+            return None
+        
+        # Hämta filstatistik
+        stats = session.query(
+            func.count().label('total_files'),
+            func.sum(FileEntry.size).label('total_size'),
+            func.count().filter(FileEntry.file_type.in_(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'])).label('image_count'),
+            func.count().filter(FileEntry.file_type.in_(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm'])).label('video_count'),
+            func.count().filter(FileEntry.file_type.in_(['mp3', 'wav', 'flac', 'ogg', 'aac', 'm4a'])).label('audio_count'),
+            func.count().filter(FileEntry.file_type.in_(['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt'])).label('document_count'),
+            func.count().filter(FileEntry.file_type.in_(['zip', 'rar', '7z', 'tar', 'gz', 'bz2'])).label('archive_count')
+        ).filter(FileEntry.disk_id == disk_id).first()
+        
+        # Hämta topp-kunder
+        top_clients = session.query(
+            FileEntry.client,
+            func.count().label('file_count')
+        ).filter(
+            FileEntry.disk_id == disk_id,
+            FileEntry.client.isnot(None),
+            FileEntry.client != ''
+        ).group_by(FileEntry.client).order_by(func.count().desc()).limit(10).all()
+        
+        # Hämta topp-projekt
+        top_projects = session.query(
+            FileEntry.project,
+            func.count().label('file_count')
+        ).filter(
+            FileEntry.disk_id == disk_id,
+            FileEntry.project.isnot(None),
+            FileEntry.project != ''
+        ).group_by(FileEntry.project).order_by(func.count().desc()).limit(10).all()
+        
+        disk_data = {
+            'id': disk.id,
+            'name': disk.name,
+            'disk_metadata': disk.disk_metadata,
+            'path': disk.path,
+            'status': disk.status,
+            'created_at': disk.created_at.isoformat() if disk.created_at else None,
+            'total_files': stats.total_files or 0,
+            'total_size': stats.total_size or 0,
+            'size_formatted': format_file_size(stats.total_size or 0),
+            'image_count': stats.image_count or 0,
+            'video_count': stats.video_count or 0,
+            'audio_count': stats.audio_count or 0,
+            'document_count': stats.document_count or 0,
+            'archive_count': stats.archive_count or 0,
+            'top_clients': [{'client': c[0], 'file_count': c[1]} for c in top_clients],
+            'top_projects': [{'project': p[0], 'file_count': p[1]} for p in top_projects]
+        }
+        
+        return disk_data
+    finally:
+        session.close()
+
 # === Filer & kataloger ===
 def get_files_by_disk(disk_id, path=None, skip=0, limit=100):
     session = SessionLocal()
@@ -326,6 +390,7 @@ def get_files_in_directory(disk_id, dir_path):
         session.close()
 
 def search_files(query, client=None, project=None, file_type=None, disk_id=None, limit=100):
+    """Sök efter filer - ENDA search_files funktionen"""
     session = SessionLocal()
     try:
         q = session.query(FileEntry)
@@ -358,6 +423,7 @@ def search_files(query, client=None, project=None, file_type=None, disk_id=None,
                 'keywords': file.keywords,
                 'checksum': file.checksum,
                 'mime_type': file.mime_type,
+                'disk_id': file.disk_id,
                 'size_formatted': format_file_size(file.size or 0),
                 'icon': get_file_icon(file.file_type or 'other')
             })
@@ -529,154 +595,3 @@ def extract_all_files_with_paths(tree_node, root_path="", current_relative_path=
             files.extend(extract_all_files_with_paths(child_node, root_path, child_path))
     
     return files
-
-def get_disk_info(disk_id: int) -> Optional[Dict]:
-    """Hämta information om specifik hårddisk med utökad statistik"""
-    session = SessionLocal()
-    try:
-        # Hämta hårddisk-info
-        disk = session.query(DiskIndex).filter(DiskIndex.id == disk_id).first()
-        
-        if not disk:
-            return None
-        
-        # Hämta filstatistik
-        stats = session.query(
-            func.count().label('total_files'),
-            func.sum(FileEntry.size).label('total_size'),
-            func.count().filter(FileEntry.file_type.in_(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'])).label('image_count'),
-            func.count().filter(FileEntry.file_type.in_(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm'])).label('video_count'),
-            func.count().filter(FileEntry.file_type.in_(['mp3', 'wav', 'flac', 'ogg', 'aac', 'm4a'])).label('audio_count'),
-            func.count().filter(FileEntry.file_type.in_(['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt'])).label('document_count'),
-            func.count().filter(FileEntry.file_type.in_(['zip', 'rar', '7z', 'tar', 'gz', 'bz2'])).label('archive_count')
-        ).filter(FileEntry.disk_id == disk_id).first()
-        
-        # Hämta topp-kunder
-        top_clients = session.query(
-            FileEntry.client,
-            func.count().label('file_count')
-        ).filter(
-            FileEntry.disk_id == disk_id,
-            FileEntry.client.isnot(None),
-            FileEntry.client != ''
-        ).group_by(FileEntry.client).order_by(func.count().desc()).limit(10).all()
-        
-        # Hämta topp-projekt
-        top_projects = session.query(
-            FileEntry.project,
-            func.count().label('file_count')
-        ).filter(
-            FileEntry.disk_id == disk_id,
-            FileEntry.project.isnot(None),
-            FileEntry.project != ''
-        ).group_by(FileEntry.project).order_by(func.count().desc()).limit(10).all()
-        
-        disk_data = {
-            'id': disk.id,
-            'name': disk.name,
-            'disk_metadata': disk.disk_metadata,
-            'path': disk.path,
-            'status': disk.status,
-            'created_at': disk.created_at.isoformat() if disk.created_at else None,
-            'total_files': stats.total_files or 0,
-            'total_size': stats.total_size or 0,
-            'size_formatted': format_file_size(stats.total_size or 0),
-            'image_count': stats.image_count or 0,
-            'video_count': stats.video_count or 0,
-            'audio_count': stats.audio_count or 0,
-            'document_count': stats.document_count or 0,
-            'archive_count': stats.archive_count or 0,
-            'top_clients': [{'client': c[0], 'file_count': c[1]} for c in top_clients],
-            'top_projects': [{'project': p[0], 'file_count': p[1]} for p in top_projects]
-        }
-        
-        return disk_data
-    finally:
-        session.close()
-
-# === Database Manager Class (för kompatibilitet med gamla koden) ===
-class DatabaseManager:
-    """Kompatibilitetsklass för gamla SQLite-koden"""
-    
-    def __init__(self, db_path: str = None):
-        # db_path ignoreras för PostgreSQL, men behålls för kompatibilitet
-        pass
-    
-    def get_connection(self):
-        """Returnera en SQLAlchemy session (för kompatibilitet)"""
-        return SessionLocal()
-    
-    def format_file_size(self, size_bytes: int) -> str:
-        """Formatera filstorlek"""
-        return format_file_size(size_bytes)
-    
-    def get_file_icon(self, file_type: str) -> str:
-        """Hämta ikon för filtyp"""
-        return get_file_icon(file_type)
-    
-    def search_files(self, query: str = '', disk_id: str = '', 
-                    file_type: str = '', client: str = '', project: str = '',
-                    limit: int = 100) -> List[Dict]:
-        """Sök efter filer"""
-        session = SessionLocal()
-        try:
-            # Konvertera disk_id från string till int om nödvändigt
-            disk_id_int = None
-            if disk_id and disk_id.strip():
-                try:
-                    disk_id_int = int(disk_id)
-                except ValueError:
-                    pass
-            
-            q = session.query(FileEntry)
-            if disk_id_int:
-                q = q.filter(FileEntry.disk_id == disk_id_int)
-            if query:
-                q = q.filter(FileEntry.name.ilike(f"%{query}%"))
-            if client:
-                q = q.filter(FileEntry.client.ilike(f"%{client}%"))
-            if project:
-                q = q.filter(FileEntry.project.ilike(f"%{project}%"))
-            if file_type:
-                q = q.filter(FileEntry.file_type == file_type)
-            
-            files = q.limit(limit).all()
-            
-            result = []
-            for file in files:
-                result.append({
-                    'id': file.id,
-                    'name': file.name,
-                    'filename': file.name,
-                    'path': file.path,
-                    'file_path': file.path,
-                    'size': file.size,
-                    'file_size': file.size,
-                    'file_type': file.file_type,
-                    'client': file.client,
-                    'project': file.project,
-                    'keywords': file.keywords,
-                    'checksum': file.checksum,
-                    'mime_type': file.mime_type,
-                    'size_formatted': format_file_size(file.size or 0),
-                    'icon': get_file_icon(file.file_type or 'other')
-                })
-            return result
-        finally:
-            session.close()
-    
-    def get_all_disks(self) -> List[Dict]:
-        """Hämta alla hårddiskar"""
-        return get_all_disks()
-    
-    def get_disk_info(self, disk_id: str) -> Optional[Dict]:
-        """Hämta information om specifik hårddisk"""
-        try:
-            disk_id_int = int(disk_id)
-            return get_disk_info(disk_id_int)
-        except ValueError:
-            return None
-    
-    def get_system_stats(self) -> Dict:
-        """Hämta systemstatistik"""
-        return get_system_stats()

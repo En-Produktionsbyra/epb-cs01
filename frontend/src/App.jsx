@@ -1,6 +1,6 @@
 import React from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import { FluentProvider, teamsLightTheme } from '@fluentui/react-components'
+import { FluentProvider, webLightTheme } from '@fluentui/react-components'
 import Layout from './components/Layout/Layout'
 import Dashboard from './components/Dashboard/Dashboard'
 import FileExplorer from './components/FileExplorer/FileExplorer'
@@ -11,7 +11,7 @@ import './App.css'
 
 function App() {
   return (
-    <FluentProvider theme={teamsLightTheme}>
+    <FluentProvider theme={webLightTheme}>
       <Router>
         <Layout>
           <Routes>
