@@ -11,6 +11,12 @@ node_modules/
 frontend/dist/
 frontend/build/
 
+# Json filer
+*.json
+
+# Labels
+scripts/*.jpg
+scripts/*.pkl
 
 # Python cache
 __pycache__/

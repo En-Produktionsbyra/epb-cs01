@@ -1,4 +1,4 @@
-# main_indexer.py
+# main_indexer.py (Corrected Version)
 
 import os
 import json
@@ -10,13 +10,9 @@ import re
 from collections import deque
 import logging
 
-# Importera från de nya modulerna
 from file_types import determine_file_type
 from constants import DEFAULT_INCLUDE_EXTENSIONS, DEFAULT_EXCLUDE_PATTERNS, EXCLUDED_ROOT_FOLDERS
-from utils import setup_logging
-from label_generator import HAS_LABEL_SUPPORT, ask_for_customer_level, generate_disk_label # ask_for_customer_level är inte direkt kopplad hit längre
 
-# Progressbar
 try:
     from tqdm import tqdm
     HAS_TQDM = True
@@ -27,360 +23,280 @@ logger = logging.getLogger(__name__)
 
 class OptimizedTreeIndexer:
     def __init__(self, max_depth: int, follow_symlinks: bool = False):
-        self.version = "2.4.1"  # Uppdaterad version efter förbättringar
+        self.version = "2.5.1" # Version updated to reflect fix
         self.checkpoint_file = None
         self.progress_bar = None
         self.max_depth = max_depth
-        self.follow_symlinks = follow_symlinks # NY: för att hantera symlänkar
-        self.tree_data = None # Initiera här för att säkerställa att den alltid finns
+        self.follow_symlinks = follow_symlinks
+        self.tree_data = None
+        self.start_time = None
 
     def _should_exclude_directory(self, dir_path: str, root_path: str, exclude_regexes: List[re.Pattern]) -> bool:
-        """Gemensam logik för om en mapp ska exkluderas."""
-        
-        # Nivå 0 filtrering - exkludera problematiska root-mappar
-        if dir_path == root_path or os.path.dirname(dir_path) == root_path:
-            base_name = os.path.basename(dir_path)
-            if base_name in EXCLUDED_ROOT_FOLDERS:
-                logger.debug(f"Exkluderar rotmapp '{base_name}' ({dir_path})")
-                return True
-        
-        for pattern in exclude_regexes:
-            if pattern.search(dir_path):
-                logger.debug(f"Exkluderar sökväg '{dir_path}' matchar mönster '{pattern.pattern}'")
-                return True
+        """Determines if a directory should be excluded from the scan."""
+        base_name = os.path.basename(dir_path)
+        if base_name in EXCLUDED_ROOT_FOLDERS:
+            return True
+        if any(regex.search(dir_path) for regex in exclude_regexes):
+            return True
         return False
 
-    def _should_include_file(self, file_name: str, include_extensions: List[str]) -> bool:
-        """Kontrollerar om filen ska inkluderas baserat på filändelse."""
-        if not include_extensions:
-            return True # Inkludera alla om ingen specifik lista finns
+    def _count_total_directories(self, root_path: str, exclude_regexes: List[re.Pattern]) -> int:
+        """Counts directories for tqdm, respecting depth and exclusions."""
+        count = 0
+        q = deque([(root_path, 0)])
+        visited = set()
         
-        _, ext = os.path.splitext(file_name)
-        return ext.lower() in include_extensions
+        while q:
+            path, depth = q.popleft()
+            
+            if path in visited:
+                continue
+            visited.add(path)
+            
+            if depth > self.max_depth:
+                continue
 
-    def _save_checkpoint(self, processed_paths: set):
-        """Sparar nuvarande tillstånd till en checkpoint-fil."""
-        if not self.checkpoint_file or not self.tree_data: # Kontrollera att tree_data finns
-            return
-        
-        checkpoint_data = {
-            'processed_paths': list(processed_paths),
-            'tree_data': self.tree_data # Spara hela tree_data
+            if self._should_exclude_directory(path, root_path, exclude_regexes):
+                continue
+            
+            count += 1
+            
+            if depth < self.max_depth:
+                try:
+                    for entry in os.scandir(path):
+                        if entry.is_dir(follow_symlinks=self.follow_symlinks):
+                            q.append((entry.path, depth + 1))
+                except (PermissionError, OSError):
+                    continue
+        return count
+
+    def _initialize_scan_data(self, root_path: str, include_extensions: List[str], exclude_patterns: List[str]) -> Tuple[Dict, set]:
+        """Initializes the main data dictionary to match the target JSON structure."""
+        self.start_time = datetime.now()
+        tree_data = {
+            'scan_info': {
+                'root_path': root_path,
+                'scan_date': self.start_time.isoformat(),
+                'scanner': 'OptimizedTreeIndexer',
+                'version': self.version,
+                'max_depth': self.max_depth,
+                'follow_symlinks': self.follow_symlinks,
+                'include_extensions': include_extensions,
+                'exclude_patterns': exclude_patterns,
+                'optimized_for': 'Cold Storage v2 with directories table'
+            },
+            'statistics': {
+                'total_files': 0,
+                'total_directories': 0,
+                'total_size': 0,
+                'file_extensions': {},
+                'file_types': {},
+                'max_depth': 0,
+                'largest_file': {'name': '', 'size': 0},
+                'scan_duration_seconds': 0,
+                'directory_depth_distribution': {},
+                'errors_warnings': []
+            },
+            'tree': {
+                'type': 'directory',
+                'name': os.path.basename(root_path) or root_path,
+                'path': root_path,
+                'relative_path': '',
+                'parent_path': None,
+                'depth': 0,
+                'children': {},
+                'files': [],
+                'metadata': {
+                    'depth': 0,
+                    'file_count': 0,
+                    'subdirectory_count': 0,
+                    'total_size': 0
+                }
+            }
         }
+        processed_paths = set()
+        return tree_data, processed_paths
+
+    def scan_directory_tree(self, root_path: str, output_file: str, include_extensions: List[str], exclude_patterns: List[str], no_resume: bool) -> Dict:
+        """Scans the directory tree and builds the detailed JSON structure."""
+        if not os.path.exists(root_path):
+            raise FileNotFoundError(f"Root path does not exist: {root_path}")
+
+        exclude_regexes = [re.compile(p, re.IGNORECASE) for p in (exclude_patterns or DEFAULT_EXCLUDE_PATTERNS)]
+        self.checkpoint_file = output_file.replace('.json', '_checkpoint.pkl')
+
+        if not no_resume and os.path.exists(self.checkpoint_file):
+            logger.info("Resuming from checkpoint...")
+            self.tree_data, processed_paths, self.start_time = self._load_checkpoint()
+        else:
+            logger.info("Starting a new scan...")
+            self.tree_data, processed_paths = self._initialize_scan_data(root_path, include_extensions, exclude_patterns)
+
+        # Pre-count directories for an accurate progress bar
+        total_dirs = 0
+        if HAS_TQDM:
+            logger.info("Counting directories for progress bar...")
+            total_dirs = self._count_total_directories(root_path, exclude_regexes)
+            logger.info(f"Found {total_dirs:,} directories to process.")
+        
+        # Setup progress bar
+        if HAS_TQDM:
+            self.progress_bar = tqdm(
+                total=total_dirs,
+                desc="Scanning...",
+                unit=" dirs",
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
+            )
+        
+        q = deque([(self.tree_data['tree'], 0)]) # Queue stores (node, depth)
         
         try:
-            # Skapa output-katalog om den inte finns
-            checkpoint_dir = os.path.dirname(self.checkpoint_file)
-            if checkpoint_dir and not os.path.exists(checkpoint_dir):
-                os.makedirs(checkpoint_dir)
+            while q:
+                current_node, depth = q.popleft()
+                current_path = current_node['path']
 
+                if current_path in processed_paths:
+                    continue
+
+                if depth > self.max_depth:
+                    continue
+
+                # Update statistics before processing
+                if current_path not in processed_paths:
+                    stats = self.tree_data['statistics']
+                    stats['total_directories'] += 1
+                    stats['max_depth'] = max(stats['max_depth'], depth)
+                    stats['directory_depth_distribution'][depth] = stats['directory_depth_distribution'].get(depth, 0) + 1
+                
+                if self.progress_bar:
+                    self.progress_bar.update(1)
+                    self.progress_bar.set_postfix_str(f"Files: {self.tree_data['statistics']['total_files']:,}, Dir: ...{current_path[-30:]}")
+
+                try:
+                    for entry in os.scandir(current_path):
+                        entry_path = entry.path
+                        if self._should_exclude_directory(entry_path, root_path, exclude_regexes):
+                            continue
+                        
+                        if entry.is_dir(follow_symlinks=self.follow_symlinks):
+                            child_node = {
+                                'type': 'directory',
+                                'name': entry.name,
+                                'path': entry_path,
+                                'relative_path': os.path.relpath(entry_path, root_path),
+                                'parent_path': current_node['relative_path'],
+                                'depth': depth + 1,
+                                'children': {}, 'files': [],
+                                'metadata': {'depth': depth + 1, 'file_count': 0, 'subdirectory_count': 0, 'total_size': 0}
+                            }
+                            current_node['children'][entry.name] = child_node
+                            current_node['metadata']['subdirectory_count'] += 1
+                            if depth + 1 <= self.max_depth:
+                                q.append((child_node, depth + 1))
+                        
+                        elif entry.is_file(follow_symlinks=self.follow_symlinks):
+                            self._process_file(entry, current_node, root_path)
+
+                except PermissionError as e:
+                    logger.warning(f"Permission denied: {current_path}")
+                    self.tree_data['statistics']['errors_warnings'].append(str(e))
+                except Exception as e:
+                    logger.error(f"Error scanning {current_path}: {e}")
+                    self.tree_data['statistics']['errors_warnings'].append(str(e))
+                
+                processed_paths.add(current_path)
+                if self.tree_data['statistics']['total_directories'] % 500 == 0:
+                    self._save_checkpoint(processed_paths)
+
+        except KeyboardInterrupt:
+            logger.warning("Scan interrupted by user. Saving checkpoint.")
+            self._save_checkpoint(processed_paths)
+            raise
+        finally:
+            if self.progress_bar:
+                self.progress_bar.close()
+
+        end_time = datetime.now()
+        self.tree_data['statistics']['scan_duration_seconds'] = (end_time - self.start_time).total_seconds()
+        self._save_tree_data(self.tree_data, output_file)
+        
+        if os.path.exists(self.checkpoint_file):
+            os.remove(self.checkpoint_file)
+        
+        return self.tree_data
+
+    def _process_file(self, entry: os.DirEntry, parent_node: Dict, root_path: str):
+        file_ext = Path(entry.name).suffix.lower()
+        include_exts = self.tree_data['scan_info']['include_extensions']
+
+        if include_exts and file_ext not in include_exts:
+            return
+
+        try:
+            file_stat = entry.stat()
+            file_size = file_stat.st_size
+            file_type = determine_file_type(file_ext)
+
+            file_info = {
+                'name': entry.name,
+                'path': entry.path,
+                'relative_path': os.path.relpath(entry.path, root_path),
+                'parent_directory': parent_node['relative_path'],
+                'extension': file_ext,
+                'size': file_size,
+                'type': file_type,
+                'modified': datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
+                'created': datetime.fromtimestamp(file_stat.st_ctime).isoformat()
+            }
+            parent_node['files'].append(file_info)
+            parent_node['metadata']['file_count'] += 1
+            parent_node['metadata']['total_size'] += file_size
+
+            stats = self.tree_data['statistics']
+            stats['total_files'] += 1
+            stats['total_size'] += file_size
+            stats['file_extensions'][file_ext] = stats['file_extensions'].get(file_ext, 0) + 1
+            stats['file_types'][file_type] = stats['file_types'].get(file_type, 0) + 1
+
+            if file_size > stats['largest_file']['size']:
+                stats['largest_file']['name'] = entry.path
+                stats['largest_file']['size'] = file_size
+
+        except (OSError, IOError) as e:
+            logger.warning(f"Could not process file {entry.path}: {e}")
+            self.tree_data['statistics']['errors_warnings'].append(f"File error: {entry.path} - {e}")
+            
+    def _save_checkpoint(self, processed_paths: set):
+        checkpoint_data = {'tree_data': self.tree_data, 'processed_paths': processed_paths, 'start_time': self.start_time}
+        try:
             with open(self.checkpoint_file, 'wb') as f:
                 pickle.dump(checkpoint_data, f)
-            
-            logger.info(f"💾 Checkpoint sparad: {len(processed_paths):,} kataloger, {self.tree_data['statistics']['total_files']:,} filer.")
-                
+            logger.debug(f"Checkpoint saved at {datetime.now().isoformat()}")
         except Exception as e:
-            logger.error(f"⚠️ Kunde inte spara checkpoint: {self.checkpoint_file} - {e}", exc_info=True)
+            logger.error(f"Failed to save checkpoint: {e}")
 
-    def _load_checkpoint(self) -> Tuple[set, Dict]:
-        """Försöker ladda från en checkpoint-fil."""
-        if not self.checkpoint_file or not os.path.exists(self.checkpoint_file):
-            return set(), None
-        
+    def _load_checkpoint(self) -> Tuple[Dict, set, datetime]:
         try:
             with open(self.checkpoint_file, 'rb') as f:
                 checkpoint_data = pickle.load(f)
-            
-            processed_paths = set(checkpoint_data.get('processed_paths', []))
-            loaded_tree_data = checkpoint_data.get('tree_data', None)
-            
-            if loaded_tree_data:
-                logger.info(f"✅ Återupptar från checkpoint: {len(processed_paths):,} kataloger, {loaded_tree_data['statistics']['total_files']:,} filer.")
-                return processed_paths, loaded_tree_data
-            else:
-                logger.warning("Checkpoint-fil saknar träd-data, börjar om.")
-                return set(), None
+            logger.info("Successfully loaded checkpoint.")
+            return checkpoint_data['tree_data'], checkpoint_data['processed_paths'], checkpoint_data['start_time']
         except Exception as e:
-            logger.error(f"❌ Kunde inte ladda checkpoint: {self.checkpoint_file} - {e}. Börjar om.", exc_info=True)
-            return set(), None
-
-    def _count_total_directories(self, root_path: str, exclude_regexes: List[re.Pattern]) -> int:
-        """
-        Räkna totalt antal kataloger (för progressbar) med djup-begränsning och exkludering.
-        Beaktar symlänkar för att undvika dubbelräkning och loopar.
-        """
-        total = 0
-        stack = [(root_path, 0)] # (path, depth)
-        visited_real_paths = set() # För att hålla koll på realpath för att hantera symlänkar
-        
-        # Se till att errors_warnings finns i statistik-dikten
-        if self.tree_data and 'statistics' in self.tree_data and 'errors_warnings' not in self.tree_data['statistics']:
-            self.tree_data['statistics']['errors_warnings'] = []
-
-        while stack:
-            current_path, current_depth = stack.pop()
+            logger.warning(f"Could not load checkpoint, starting new scan. Reason: {e}")
+            root_path = self.tree_data['scan_info']['root_path'] if self.tree_data else ''
+            include_exts = self.tree_data['scan_info']['include_extensions'] if self.tree_data else []
+            exclude_pats = self.tree_data['scan_info']['exclude_patterns'] if self.tree_data else []
+            tree_data, processed_paths = self._initialize_scan_data(root_path, include_exts, exclude_pats)
+            return tree_data, processed_paths, self.start_time
             
-            if current_depth > self.max_depth:
-                continue # Hoppa över om djupet överskrids
-            
-            real_current_path = os.path.realpath(current_path)
-            if real_current_path in visited_real_paths:
-                continue # Hoppa över redan räknad fysisk sökväg (symlänk eller dubblett)
-            
-            if self._should_exclude_directory(current_path, root_path, exclude_regexes):
-                continue # Hoppa över exkluderade mappar
-            
-            try:
-                visited_real_paths.add(real_current_path) # Markera som besökt
-                total += 1 # Räkna denna katalog
-                
-                # Om vi inte är för djupt, lägg till underkataloger i stacken
-                if current_depth < self.max_depth:
-                    for item in os.listdir(current_path):
-                        item_path = os.path.join(current_path, item)
-                        
-                        if os.path.islink(item_path) and not self.follow_symlinks:
-                            logger.debug(f"Hoppar över symlänk (follow_symlinks=False): {item_path}")
-                            continue # Hoppa över symlänkar om inte aktiverat
-
-                        if self._should_exclude_directory(item_path, root_path, exclude_regexes):
-                            continue
-                        
-                        if os.path.isdir(item_path):
-                            stack.append((item_path, current_depth + 1))
-                            
-            except PermissionError:
-                logger.warning(f"Ingen åtkomst för att räkna mappar i: {current_path}")
-                total += 1 
-                if self.tree_data and 'statistics' in self.tree_data:
-                    self.tree_data['statistics']['errors_warnings'].append(f"Permission denied: {current_path}")
-                continue
-            except OSError as e:
-                logger.warning(f"OS-fel vid räkning av mappar i {current_path}: {e}")
-                total += 1 
-                if self.tree_data and 'statistics' in self.tree_data:
-                    self.tree_data['statistics']['errors_warnings'].append(f"OS Error '{e}': {current_path}")
-                continue
-            except Exception as e:
-                logger.error(f"Oväntat fel vid räkning av mappar i {current_path}: {e}", exc_info=True)
-                total += 1 
-                if self.tree_data and 'statistics' in self.tree_data:
-                    self.tree_data['statistics']['errors_warnings'].append(f"Unexpected error '{e}': {current_path}")
-                continue
-    
-        return total
-
-    def _scan_level_by_level(self, root_path: str, exclude_regexes: List[re.Pattern],
-                            include_extensions: List[str], checkpoint_interval: int,
-                            resumed_from_checkpoint: bool, processed_paths: set):
-        """Skannar katalogträdet nivå för nivå för att hantera minnes- och prestandaproblem."""
-        
-        # Räkna totalt antal kataloger för progressbar
-        logger.info("Scanning av katalogstruktur för att beräkna totalt antal mappar (detta kan ta en stund för stora träd)...")
-        total_dirs = self._count_total_directories(root_path, exclude_regexes)
-        logger.info(f"Hittade {total_dirs:,} mappar att scanna.")
-
-        # Initiera progressbar om tqdm är tillgängligt
-        if HAS_TQDM:
-            self.progress_bar = tqdm(total=total_dirs, unit="dirs", desc="Skannar")
-            if processed_paths:
-                self.progress_bar.update(len(processed_paths)) # Återställ progressbar om återupptagen
-        
-        # Använd deque för effektiv FIFO-hantering
-        queue = deque([(root_path, 0, self.tree_data['tree'])]) # Använder self.tree_data här
-
-        dirs_scanned_since_checkpoint = 0
-
-        while queue:
-            current_path, current_depth, current_node = queue.popleft()
-
-            if current_path in processed_paths:
-                if self.progress_bar:
-                    self.progress_bar.set_postfix_str(f"Skipping {os.path.basename(current_path)} (processed)")
-                continue
-
-            if current_depth > self.max_depth:
-                processed_paths.add(current_path)
-                if self.progress_bar:
-                    self.progress_bar.update(1)
-                    self.progress_bar.set_postfix_str(f"Max depth reached for {os.path.basename(current_path)}")
-                continue
-
-            if self._should_exclude_directory(current_path, root_path, exclude_regexes):
-                processed_paths.add(current_path)
-                if self.progress_bar:
-                    self.progress_bar.update(1)
-                    self.progress_bar.set_postfix_str(f"Excluded: {os.path.basename(current_path)}")
-                continue
-
-            # Uppdatera statistik för totalt antal kataloger
-            if current_path != root_path: # Rotmappen räknades redan av _count_total_directories
-                self.tree_data['statistics']['total_directories'] += 1
-            
-            # Uppdatera max djup
-            if current_depth > self.tree_data['statistics']['max_depth']:
-                self.tree_data['statistics']['max_depth'] = current_depth
-
-            files_in_dir = []
-            
-            try:
-                with os.scandir(current_path) as entries:
-                    for entry in entries:
-                        if entry.is_dir(follow_symlinks=self.follow_symlinks):
-                            # Lägg till underkataloger i kön
-                            child_node = {}
-                            current_node[entry.name] = child_node
-                            queue.append((entry.path, current_depth + 1, child_node))
-                        elif entry.is_file(follow_symlinks=self.follow_symlinks):
-                            if self._should_include_file(entry.name, include_extensions):
-                                file_size = entry.stat().st_size
-                                file_extension = os.path.splitext(entry.name)[1].lower()
-                                file_type = determine_file_type(file_extension)
-                                
-                                files_in_dir.append({
-                                    "name": entry.name,
-                                    "size": file_size,
-                                    "extension": file_extension,
-                                    "type": file_type
-                                })
-                                # Uppdatera statistik
-                                self.tree_data['statistics']['total_files'] += 1
-                                self.tree_data['statistics']['total_size'] += file_size
-                                self.tree_data['statistics']['file_types'][file_type] = \
-                                    self.tree_data['statistics']['file_types'].get(file_type, 0) + 1
-                                
-            except PermissionError:
-                logger.warning(f"Ingen åtkomst till: {current_path}")
-                self.tree_data['statistics']['errors_warnings'].append(f"Permission denied: {current_path}")
-            except FileNotFoundError: # Kan hända om en mapp tas bort under scanning
-                logger.warning(f"Mapp hittades inte under scanning: {current_path}")
-                self.tree_data['statistics']['errors_warnings'].append(f"Directory not found: {current_path}")
-            except OSError as e:
-                logger.error(f"OS-fel i {current_path}: {e}")
-                self.tree_data['statistics']['errors_warnings'].append(f"OS Error '{e}': {current_path}")
-            except Exception as e:
-                logger.error(f"Oväntat fel i {current_path}: {e}", exc_info=True)
-                self.tree_data['statistics']['errors_warnings'].append(f"Unexpected error '{e}': {current_path}")
-
-            if files_in_dir:
-                current_node['files'] = files_in_dir
-
-            processed_paths.add(current_path)
-            dirs_scanned_since_checkpoint += 1
-
-            if self.progress_bar:
-                self.progress_bar.update(1)
-                self.progress_bar.set_postfix_str(f"Files: {len(files_in_dir)} (Total: {self.tree_data['statistics']['total_files']:,})")
-
-            # Spara checkpoint periodvis
-            if checkpoint_interval > 0 and dirs_scanned_since_checkpoint >= checkpoint_interval:
-                self._save_checkpoint(processed_paths)
-                dirs_scanned_since_checkpoint = 0 # Återställ räknare
-
-        if self.progress_bar:
-            self.progress_bar.close()
-
-    def scan_directory_tree(self, root_path: str, output_file: str,
-                            include_extensions: List[str] = None,
-                            exclude_patterns: List[str] = None,
-                            resume: bool = True, checkpoint_interval: int = 1000) -> Dict:
-        """
-        Scannar en katalog och bygger en JSON-struktur.
-        Implementerar checkpointing och återupptagning.
-        """
-        logger.info(f"Scanning '{root_path}' (Max djup: {self.max_depth}, Följ symlänkar: {self.follow_symlinks})")
-
-        self.checkpoint_file = f"{output_file}.checkpoint"
-        processed_paths, loaded_tree_data = set(), None
-        resume_successful = False
-
-        if resume:
-            processed_paths, loaded_tree_data = self._load_checkpoint()
-            if loaded_tree_data:
-                self.tree_data = loaded_tree_data # Ladda in checkpoint-data i self.tree_data
-                resume_successful = True
-            else:
-                logger.info("Ingen giltig checkpoint hittades eller kunde laddas. Börjar ny scanning.")
-        
-        # Initiera self.tree_data om den inte laddades från checkpoint
-        if not self.tree_data:
-            exclude_patterns_str = exclude_patterns if exclude_patterns else DEFAULT_EXCLUDE_PATTERNS
-            if isinstance(exclude_patterns_str, list):
-                exclude_patterns_str = [re.compile(p) for p in exclude_patterns_str]
-
-            self.tree_data = { # Initiera self.tree_data här
-                "metadata": {
-                    "version": self.version,
-                    "disk_name": Path(root_path).name,
-                    "scan_date": datetime.now().isoformat(),
-                    "root_path": root_path,
-                    "max_depth": self.max_depth,
-                    "follow_symlinks": self.follow_symlinks,
-                    "include_extensions": include_extensions,
-                    "exclude_patterns": [p.pattern for p in exclude_patterns_str] if exclude_patterns_str else [],
-                    "resumed_from_checkpoint": resume_successful
-                },
-                "tree": {},
-                "statistics": {
-                    "total_directories": 0,
-                    "total_files": 0,
-                    "total_size": 0,
-                    "max_depth": 0,
-                    "file_types": {},
-                    "errors_warnings": []
-                }
-            }
-        else: # Om återupptagen, uppdatera metadata för den nya scanningen
-            self.tree_data['metadata']['scan_date'] = datetime.now().isoformat()
-            self.tree_data['metadata']['resumed_from_checkpoint'] = resume_successful
-            logger.info("Återupptagen scanning - använder befintlig träddata från checkpoint.")
-
-
-        if exclude_patterns:
-            compiled_exclude_regexes = [re.compile(p) for p in exclude_patterns]
-        else:
-            compiled_exclude_regexes = [re.compile(p) for p in DEFAULT_EXCLUDE_PATTERNS]
-
-        try:
-            self._scan_level_by_level(
-                root_path,
-                compiled_exclude_regexes,
-                include_extensions if include_extensions else DEFAULT_INCLUDE_EXTENSIONS,
-                checkpoint_interval,
-                resume_successful,
-                processed_paths
-            )
-            # Spara en sista checkpoint efter att scanningen är klar
-            self._save_checkpoint(processed_paths)
-            
-            # Ta bort checkpoint-filen om allt gick bra
-            if os.path.exists(self.checkpoint_file):
-                os.remove(self.checkpoint_file)
-                logger.info(f"🗑️ Checkpoint-fil borttagen: {self.checkpoint_file}")
-
-        except Exception as e:
-            logger.error(f"❌ Ett oväntat fel inträffade under scanningen: {e}", exc_info=True)
-            self._save_checkpoint(processed_paths) # Försök spara checkpoint vid fel
-            raise # Kasta om felet så att main-funktionen kan hantera det
-
-        self._save_tree_data(self.tree_data, output_file)
-        return self.tree_data # Returnera den slutgiltiga self.tree_data
-
     def _save_tree_data(self, tree_data: Dict, output_file: str):
-        """Spara träd-data till fil."""
-        
-        logger.info(f"💾 Sparar träd-data till: {output_file}")
-        
-        output_dir = os.path.dirname(output_file)
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        
+        logger.info(f"Saving data to {output_file}...")
         try:
+            output_dir = os.path.dirname(output_file)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(tree_data, f, indent=2, ensure_ascii=False)
-            
-            file_size = os.path.getsize(output_file)
-            logger.info(f"✅ Träd-data sparad ({file_size / 1024 / 1024:.2f} MB).")
-                
+            logger.info(f"✅ Successfully saved JSON output to {output_file}")
         except Exception as e:
-            logger.error(f"❌ Fel vid sparande av JSON-fil: {output_file} - {e}", exc_info=True)
+            logger.error(f"Failed to save JSON file: {e}")

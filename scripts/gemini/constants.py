@@ -16,35 +16,25 @@ DEFAULT_INCLUDE_EXTENSIONS = [
 
 # Default exclude patterns (regex)
 DEFAULT_EXCLUDE_PATTERNS = [
-    r'\.DS_Store$',
-    r'Thumbs\.db$', 
-    r'\.tmp$',
-    r'\.temp$',
+    r'\\.DS_Store$',
+    r'Thumbs\\.db$',
+    r'\\.tmp$',
+    r'\\.temp$',
     r'__MACOSX',
     r'System Volume Information',
-    r'\$RECYCLE\.BIN',
-    r'\.VolumeIcon',
-    r'\.localized', # Vanligt på macOS för lokaliserade mappar
-    r'\.Trash', # Fånga fler typer av papperskorgar
-    r'\$([A-Za-z0-9_]{2})', # Exkludera Windows systemmappar som $Recycle.Bin
+    r'\\$RECYCLE\\.BIN',
+    r'\\.VolumeIcon',
+    r'\\.localized', # Vanligt på macOS för lokaliserade mappar
+    r'\\.Trash', # Fånga fler typer av papperskorgar
+    r'\\$([A-Za-z0-9_]{2})', # Exkludera Windows systemmappar som $Recycle.Bin
 ]
 
 # Root folders som alltid ska exkluderas oavsett djup
-EXCLUDED_ROOT_FOLDERS = [
-    'Backups.backupdb',
-    '.Spotlight-V100', 
-    '.TemporaryItems',
-    '.Trashes',
+EXCLUDED_ROOT_FOLDERS = {
+    'lost+found',
     '.fseventsd',
-    '$RECYCLE.BIN',
-    'System Volume Information',
-]
-
-# System- och dolda mappar som ska filtreras bort från kundlistor
-SYSTEM_AND_HIDDEN_FOLDERS = {
-    '.fseventsd', 
-    '.Spotlight-V100', 
-    '.TemporaryItems', 
+    '.Spotlight-V100',
+    '.TemporaryItems',
     '.Trashes',
     'Backups.backupdb',
     '.DS_Store',
@@ -58,6 +48,26 @@ SYSTEM_AND_HIDDEN_FOLDERS = {
     'Thumbs.db',
     # Lägg till fler om du stöter på dem
 }
+
+# System och dolda mappar som kan behöva specialhantering
+SYSTEM_AND_HIDDEN_FOLDERS = [
+    '.Trashes',         # macOS Trash
+    '.Spotlight-V100',  # macOS Spotlight index
+    '.fseventsd',       # macOS file system events
+    '.DS_Store',        # macOS directory metadata
+    'System Volume Information', # Windows system folder
+    '$RECYCLE.BIN',     # Windows recycle bin
+    '__MACOSX',         # macOS resource fork folder for archives
+    'Thumbs.db',        # Windows thumbnail cache
+    '.TemporaryItems',  # macOS temporary items
+    '.hidden',          # Linux/Unix common hidden directory
+    'lost+found',       # Linux/Unix for recovered files
+    '.localized',       # macOS localization marker
+    '.VolumeIcon.icns', # macOS custom volume icon
+    '.disk_label',      # Custom label files
+    '.disk_label_2x',   # Custom label files
+]
+
 
 # Standard font sökvägar för PIL (ordning av preferens)
 FONT_PATHS = [
@@ -74,12 +84,6 @@ LABEL_WIDTH_MM = 50 # Bredd på etiketten i millimeter (standard för Dymo 11352
 LABEL_HEIGHT_MM = 80 # Höjd på etiketten i millimeter
 
 # Marginaler i millimeter (konverteras till pixlar i label_generator.py)
-MARGIN_MM = 3 # 3 mm marginal runt hela etiketten
-
-# QR Code Settings
-QR_CODE_SIZE_MM = 20 # Storlek på QR-koden i millimeter (på huvudetiketten)
-
-# Fontstorlekar (startvärden för dynamisk skalning)
-DEFAULT_DISK_NAME_FONT_SIZE = 120 # Startstorlek för diskens namn (huvudetikett & header)
-DEFAULT_CUSTOMER_FONT_SIZE = 40 # Startstorlek för kundlista
-DEFAULT_STATS_FONT_SIZE = 25 # Startstorlek för statistik
+MARGIN_MM = 3
+QR_SIZE_MM = 40 # Adjust as needed, based on LABEL_WIDTH_MM and LABEL_HEIGHT_MM
+HEADER_HEIGHT_MM = 15 # Adjust as needed, based on design requirements

@@ -3,6 +3,9 @@
 import argparse
 import os
 import re
+import logging # Lägg till denna rad
+
+logger = logging.getLogger(__name__) # Lägg till denna rad
 
 from constants import DEFAULT_INCLUDE_EXTENSIONS
 
@@ -45,19 +48,21 @@ Om denna flagga används, ignoreras --extensions om det också är angivet.
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Sätt loggnivå (default: INFO).')
 
-    args = parser.parse_args()
+    args_parsed = parser.parse_args()
 
+    logger.debug(f"Debug cli_parser: args.path = '{args_parsed.path}'")
+    
     # Förbered extensions
     extensions = None
-    if args.foto_only:
+    if args_parsed.foto_only:
         extensions = [
             '.cr2', '.cr3', '.nef', '.arw', '.dng', '.iiq', '.3fr', '.orf', '.rw2', '.pef', # RAW
             '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.psd', '.gif', '.bmp', '.webp', '.svg', # Standard bild
             '.mp4', '.mov', '.avi', '.r3d', '.braw', '.mxf', '.mkv', '.wmv', '.m4v' # Video
         ]
-    elif args.extensions:
+    elif args_parsed.extensions:
         # Säkerställ att extensions börjar med punkt
-        extensions = [ext if ext.startswith('.') else f'.{ext}' for ext in args.extensions]
+        extensions = [ext if ext.startswith('.') else f'.{ext}' for ext in args_parsed.extensions]
     else:
         # Om varken --foto-only eller --extensions är angivna, använd DEFAULT_INCLUDE_EXTENSIONS
         # Detta innebär att ALLA filer (baserat på defaultlista) inkluderas om ingen restriktion anges
@@ -65,27 +70,32 @@ Om denna flagga används, ignoreras --extensions om det också är angivet.
         extensions = DEFAULT_INCLUDE_EXTENSIONS 
 
     # Förbered output-filnamn
-    output_file = args.output
+    output_file = args_parsed.output
     safe_name = ""
     if not output_file:
-        disk_name = os.path.basename(args.path.rstrip(os.sep)) or 'UnknownDisk'
+        disk_name = os.path.basename(args_parsed.path.rstrip(os.sep)) or 'UnknownDisk'
+        logger.debug(f"Debug cli_parser: disk_name = '{disk_name}'")
         safe_name = re.sub(r'[^\w\-_\.]', '_', disk_name)
+        logger.debug(f"Debug cli_parser: safe_name = '{safe_name}'")
         output_file = f"{safe_name}.json"
     else:
         # Om en output-fil angavs, generera safe_name från den
         base_output_name = os.path.basename(output_file)
         safe_name = re.sub(r'[^\w\-_\.]', '_', base_output_name.replace('.json', ''))
     
+    logger.debug(f"Debug cli_parser: final output_file generated = '{output_file}'")
+
     return {
-        'path': args.path,
+        'path': args_parsed.path,
         'output_file': output_file,
         'include_extensions': extensions,
-        'exclude_patterns': args.exclude,
-        'no_label': args.no_label,
-        'no_resume': args.no_resume,
-        'checkpoint_interval': args.checkpoint_interval,
-        'max_depth': args.max_depth,
-        'follow_symlinks': args.follow_symlinks,
+        # FIX FÖR 'NoneType' error: Säkerställ att exclude_patterns alltid är en lista
+        'exclude_patterns': args_parsed.exclude or [], # <-- ÄNDRING HÄR
+        'no_label': args_parsed.no_label,
+        'no_resume': args_parsed.no_resume,
+        'checkpoint_interval': args_parsed.checkpoint_interval,
+        'max_depth': args_parsed.max_depth,
+        'follow_symlinks': args_parsed.follow_symlinks,
         'disk_safe_name': safe_name,
-        'log_level': args.log_level.upper()
+        'log_level': args_parsed.log_level.upper()
     }
