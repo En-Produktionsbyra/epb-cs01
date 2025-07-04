@@ -122,7 +122,8 @@ const Layout = ({ children }) => {
               alignItems: 'center',
               width: '100%'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
+                        onClick={() => handleMobileNavigation('/')}>
                 <FolderOpen24Regular style={{ fontSize: '24px', color: tokens.colorBrandForeground1 }} />
                 <Text size={600} weight="semibold">Cold Storage</Text>
               </div>

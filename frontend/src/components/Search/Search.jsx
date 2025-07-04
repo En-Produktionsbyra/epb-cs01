@@ -70,7 +70,7 @@ const useStyles = makeStyles({
   
   searchInput: {
     flex: 1,
-    width: '1000px',
+    width: '800px',
     maxWidth: '100%',
     // På mobil: full bredd
     '@media (max-width: 768px)': {
