@@ -3,6 +3,7 @@
 Optimized Tree Indexer för Cold Storage v2 - COMPLETE FIXED VERSION
 Skapar JSON-struktur som är perfekt för import till directories-tabellen
 ALLA FIXES: Djup-begränsning, Auto-skalad text, Roterad header, Smart kundlista-filtrering
+UPDATERAD v3.0.0: KATASYMBOL EDITION - Native 203 DPI för pixel-perfekt skärpa
 """
 
 import os
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import re
 import sys
+import math
 from collections import deque
 
 # För QR-kod och label-generering
@@ -40,158 +42,170 @@ def get_text_size_global(text, font, draw_obj):
     except AttributeError:
         return draw_obj.textsize(text, font=font)
 
-def find_optimal_customer_list_font(customer_folders, max_width, max_height, draw_obj):
+def render_wrapped_list(items, full_width, max_height, start_x, start_y, qr_box, draw_obj):
     """
-    Hitta optimal font-storlek för kundlistan som maximerar användningen av tillgängligt utrymme
-    """
-    font_paths = [
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/System/Library/Fonts/Arial.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    ]
+    NY SMART FUNKTION (v2.7.0): Flow layout som 'rappar' texten runt QR-koden.
     
-    optimal_size = 8  # Fallback minimum
-    
-    # Testa font-storlekar från 8 till 40
-    for font_size in range(8, 41):
-        # Ladda font
-        test_font = None
-        for font_path in font_paths:
-            try:
-                test_font = ImageFont.truetype(font_path, font_size)
-                break
-            except (OSError, IOError):
-                continue
-        
-        if test_font is None:
-            test_font = ImageFont.load_default()
-        
-        # Simulera renderingen av hela listan
-        total_height_needed = simulate_customer_list_rendering(
-            customer_folders, test_font, max_width, draw_obj
-        )
-        
-        # Kontrollera om allt får plats
-        if total_height_needed <= max_height:
-            optimal_size = font_size  # Denna storlek fungerar
-        else:
-            break  # För stor, använd föregående storlek
-    
-    return optimal_size
-
-def simulate_customer_list_rendering(customer_folders, font, max_width, draw_obj):
+    qr_box: Tuple (x, y, w, h) som definierar området där QR-koden ligger (exkludera detta).
     """
-    Simulera renderingen av kundlistan för att beräkna total höjd
-    """
-    total_height = 0
-    line_spacing = 4  # Spacing mellan rader
-    
-    for folder in customer_folders:
-        # Formatera text
-        display_text = f"• {folder}"
-        
-        # Mät textstorleken
-        text_width, text_height = get_text_size_global(display_text, font, draw_obj)
-        
-        # Kontrollera om texten behöver brytas
-        if text_width > max_width:
-            # Beräkna hur många rader som behövs (förenklad)
-            estimated_chars_per_line = len(display_text) * (max_width / text_width)
-            estimated_lines = max(1, len(display_text) / max(1, estimated_chars_per_line))
-            text_height = text_height * estimated_lines
-        
-        total_height += text_height + line_spacing
-    
-    return total_height
-
-def render_customer_list_with_font(customer_folders, font_size, max_width, max_height, start_x, start_y, draw_obj):
-    """
-    Rendera kundlistan med given font-storlek och optimal radavstånd
-    """
-    # Ladda font
     font_paths = [
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/Arial.ttf", 
         "C:/Windows/Fonts/arial.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     ]
+
+    def load_font(size):
+        for path in font_paths:
+            try:
+                return ImageFont.truetype(path, size)
+            except:
+                continue
+        return ImageFont.load_default()
+
+    best_config = None
     
-    customer_font = None
-    for font_path in font_paths:
-        try:
-            customer_font = ImageFont.truetype(font_path, font_size)
+    # QR exclusion zone (left, top, right, bottom)
+    # Lägg till padding runt QR-koden så texten inte nuddar den
+    qx, qy, qw, qh = qr_box
+    qr_padding = 5 # Justerat för 203 DPI (var 20)
+    qr_rect = (qx - qr_padding, qy - qr_padding, qx + qw + qr_padding, qy + qh + qr_padding)
+
+    # Funktion för att kontrollera kollision med QR-koden
+    def check_collision(slot_rect, exclusion_rect):
+        sl, st, sr, sb = slot_rect
+        el, et, er, eb = exclusion_rect
+        
+        # Om slotten är helt till vänster, höger, ovanför eller under exclusion -> INGEN krock
+        if sr < el or sl > er or sb < et or st > eb:
+            return False
+        return True
+
+    # === OPTIMERINGS-LOOP ===
+    # Anpassade font-storlekar för 203 DPI (ca 1/4 av 900 DPI)
+    # Testar från ca 25px (stort) ner till 8px (läsbart)
+    for font_size in range(30, 7, -1):
+        font = load_font(font_size)
+        
+        # Mät radhöjd
+        _, text_height = get_text_size_global("Ay", font, draw_obj)
+        line_height = text_height + int(font_size * 0.2) # 20% spacing
+        
+        # Testa kolumnantal (1-2)
+        for num_cols in range(1, 3):
+            col_width = full_width // num_cols
+            padding_x = 5 # Justerat för 203 DPI
+            
+            # Simulera utplacering
+            current_y = start_y
+            items_placed = 0
+            success = True
+            
+            # Kopiera item-listan för simulering
+            sim_items = list(items)
+            
+            while sim_items and current_y + line_height <= start_y + max_height:
+                # Försök fylla en rad med slots
+                row_slots = []
+                for c in range(num_cols):
+                    slot_x = start_x + (c * col_width)
+                    slot_rect = (slot_x, current_y, slot_x + col_width, current_y + line_height)
+                    
+                    # Kolla om denna slot krockar med QR-koden
+                    if not check_collision(slot_rect, qr_rect):
+                        row_slots.append((slot_x, current_y))
+                
+                # Fyll slotsen med items
+                for slot in row_slots:
+                    if sim_items:
+                        sim_items.pop(0)
+                        items_placed += 1
+                
+                current_y += line_height
+            
+            # Om alla items fick plats
+            if not sim_items:
+                best_config = {
+                    'font': font,
+                    'font_size': font_size,
+                    'num_cols': num_cols,
+                    'line_height': line_height,
+                    'col_width': col_width,
+                    'padding_x': padding_x
+                }
+                break # Hittade en config för denna font-storlek, gå vidare (eftersom vi vill ha störst möjliga font)
+        
+        if best_config:
             break
-        except (OSError, IOError):
-            continue
+
+    # Fallback om inget passar
+    if not best_config:
+        print("⚠️ Varning: Texten får knappt plats, använder fallback-läge.")
+        font_size = 8 # Minsta läsbara vid 203 DPI
+        font = load_font(font_size)
+        _, text_height = get_text_size_global("Ay", font, draw_obj)
+        best_config = {
+            'font': font,
+            'font_size': font_size,
+            'num_cols': 2, # Begränsad till 2 även i fallback
+            'line_height': text_height + 2,
+            'col_width': full_width // 2,
+            'padding_x': 2
+        }
+
+    # === RENDERING ===
+    print(f"🎨 Vald layout: {best_config['num_cols']} kolumner, textstorlek {best_config['font_size']}px (Wrapped)")
     
-    if customer_font is None:
-        customer_font = ImageFont.load_default()
+    font = best_config['font']
+    line_h = best_config['line_height']
+    col_w = best_config['col_width']
+    pad_x = best_config['padding_x']
     
-    # Beräkna optimal radavstånd
-    total_text_height = 0
-    text_heights = []
-    
-    # Första passet: mät alla texter
-    for folder in customer_folders:
-        display_text = f"• {folder}"
-        _, text_height = get_text_size_global(display_text, customer_font, draw_obj)
-        text_heights.append(text_height)
-        total_text_height += text_height
-    
-    # Beräkna spacing för att fylla hela höjden optimalt
-    if len(customer_folders) > 1:
-        available_spacing = max_height - total_text_height
-        optimal_line_spacing = max(2, available_spacing / (len(customer_folders) - 1))
-    else:
-        optimal_line_spacing = 4
-    
-    print(f"📊 Kundlista rendering: {len(customer_folders)} rader, radavstånd: {optimal_line_spacing:.1f}px")
-    
-    # Andra passet: rendera texterna
     current_y = start_y
-    rendered_count = 0
+    item_idx = 0
     
-    for i, folder in enumerate(customer_folders):
-        # Kontrollera om vi har plats kvar
-        if current_y + text_heights[i] > start_y + max_height:
-            print(f"🛑 Kundlista trunkerad vid {rendered_count}/{len(customer_folders)} mappar")
+    while item_idx < len(items):
+        # Identifiera giltiga slots för denna rad
+        row_slots = []
+        for c in range(best_config['num_cols']):
+            slot_x = start_x + (c * col_w)
+            slot_rect = (slot_x, current_y, slot_x + col_w, current_y + line_h)
+            
+            if not check_collision(slot_rect, qr_rect):
+                row_slots.append(slot_x)
+        
+        # Rita items i slotsen
+        for slot_x in row_slots:
+            if item_idx >= len(items):
+                break
+                
+            item_text = f"• {items[item_idx]}"
+            
+            # Truncera text om den är för lång för sin kolumn
+            avail_w = col_w - pad_x
+            text_w, _ = get_text_size_global(item_text, font, draw_obj)
+            
+            display_text = item_text
+            if text_w > avail_w:
+                while text_w > avail_w and len(display_text) > 5:
+                    display_text = display_text[:-4] + "..."
+                    text_w, _ = get_text_size_global(display_text, font, draw_obj)
+            
+            draw_obj.text((slot_x, current_y), display_text, fill='black', font=font)
+            item_idx += 1
+            
+        current_y += line_h
+        
+        # Säkerhetsspärr
+        if current_y > start_y + max_height:
             break
-        
-        # Förkorta text om nödvändigt för att få plats i bredd
-        display_text = f"• {folder}"
-        text_width = get_text_size_global(display_text, customer_font, draw_obj)[0]
-        
-        if text_width > max_width:
-            # Förkorta iterativt
-            shortened_folder = folder
-            while len(shortened_folder) > 5:
-                test_text = f"• {shortened_folder}..."
-                if get_text_size_global(test_text, customer_font, draw_obj)[0] <= max_width:
-                    display_text = test_text
-                    break
-                shortened_folder = shortened_folder[:-1]
-        
-        # Rita texten
-        draw_obj.text((start_x, current_y), display_text, fill='black', font=customer_font)
-        
-        current_y += text_heights[i] + optimal_line_spacing
-        rendered_count += 1
-        
-        # Debug varje 20:e rad
-        if rendered_count % 20 == 0:
-            remaining_height = (start_y + max_height) - current_y
-            print(f"📍 Kundlista: {rendered_count}/{len(customer_folders)}, höjd kvar: {remaining_height:.0f}px")
-    
-    final_fill_percentage = (current_y - start_y) / max_height * 100
-    print(f"🏁 Kundlista slutförd: {rendered_count}/{len(customer_folders)} mappar, {final_fill_percentage:.1f}% fyllning")
 
 class OptimizedTreeIndexer:
     def __init__(self, max_depth=8):
-        self.version = "2.3.0"  # Uppdaterad version med alla fixes
+        self.version = "3.0.0"  # Uppdaterad version: Katasymbol Native (203 DPI)
         self.checkpoint_file = None
         self.progress_bar = None
-        self.max_depth = max_depth  # DJUP-BEGRÄNSNING
+        self.max_depth = max_depth
         
     def determine_file_type(self, extension: str) -> str:
         """Bestäm fil-kategori baserat på extension"""
@@ -837,16 +851,17 @@ class OptimizedTreeIndexer:
         
         # === MAIN LABEL (50x80mm) ===
         width_mm, height_mm = 50, 80
-        dpi = 900
+        # KATASYMBOL NATIVE DPI (203 DPI)
+        dpi = 203
         width_px = int(width_mm * dpi / 25.4)
         height_px = int(height_mm * dpi / 25.4)
         
-        print(f"📏 Main Label: {width_px}x{height_px} pixels ({width_mm}x{height_mm}mm)")
+        print(f"📏 Main Label: {width_px}x{height_px} pixels ({width_mm}x{height_mm}mm @ {dpi} DPI)")
         
         img = Image.new('RGB', (width_px, height_px), 'white')
         draw = ImageDraw.Draw(img)
         
-        margin = 30
+        margin = 0
         content_width = width_px - (2 * margin)
         
         # Font paths
@@ -864,59 +879,16 @@ class OptimizedTreeIndexer:
             except:
                 return draw.textsize(text, font)
         
-        # === AUTO-SKALAD HUVUDRUBRIK (INTE TRUNKERAD!) ===
+        # === BORTTAGET: RUBRIK OCH TITEL ===
+        # Vi använder hela ytan för listan
         current_y = margin
-        qr_size = 250  # Fast QR-storlek
-        text_padding = 30
-        available_text_width = width_px - qr_size - text_padding - (margin * 2)
-        available_text_height = 120
-        
-        print(f"🔍 Auto-skalar rubrik: '{disk_name}' i {available_text_width}x{available_text_height}px")
-        
-        # KORREKT AUTO-SKALNING - INGEN TRUNKERING
-        optimal_font = None
-        final_text_size = None
-        
-        for font_size in range(120, 7, -2):  # Från 120px ner till 8px
-            font_loaded = False
-            for font_path in font_paths:
-                try:
-                    test_font = ImageFont.truetype(font_path, font_size)
-                    font_loaded = True
-                    break
-                except (OSError, IOError):
-                    continue
-            
-            if not font_loaded:
-                test_font = ImageFont.load_default()
-            
-            # Mät HELA disk-namnet (ingen trunkering)
-            text_width, text_height = get_text_size(disk_name, test_font)
-            
-            if text_width <= available_text_width and text_height <= available_text_height:
-                optimal_font = test_font
-                final_text_size = (text_width, text_height)
-                print(f"✅ Optimal rubrik-font: {font_size}px för HELA namnet")
-                break
-        
-        if optimal_font is None:
-            optimal_font = ImageFont.load_default()
-            final_text_size = get_text_size(disk_name, optimal_font)
-            print("⚠️ Använder fallback font för rubrik")
-        
-        # Rita HELA disk-namnet (auto-skalat)
-        text_x = margin
-        text_y = current_y + (available_text_height - final_text_size[1]) // 2
-        draw.text((text_x, text_y), disk_name, fill='black', font=optimal_font)
-        
-        print(f"✅ Auto-skalad rubrik: '{disk_name}' ({final_text_size[0]}x{final_text_size[1]}px)")
-        
-        current_y += available_text_height + 20
+        # QR storlek i pixlar vid 203 DPI (21mm = ~170px)
+        qr_size = 170 
         
         # === QR-KOD FÖR MAIN LABEL ===
         try:
             qr_url = f"https://coldstorage.enproduktionsbyra.se/disks/{safe_name}"
-            qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=3, border=1)
+            qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=2, border=1) # Box size 2 för lägre upplösning
             qr.add_data(qr_url)
             qr.make(fit=True)
             
@@ -927,9 +899,14 @@ class OptimizedTreeIndexer:
             qr_y = margin
             img.paste(qr_img, (qr_x, qr_y))
             
+            # Definiera exkluderingsområdet för text-wrappern
+            # (Left, Top, Width, Height)
+            qr_rect = (qr_x, qr_y, qr_size, qr_size)
+            
             print(f"✅ Main QR-kod: {qr_size}x{qr_size}px")
         except Exception as e:
             print(f"❌ QR-kod fel: {e}")
+            qr_rect = (width_px, 0, 0, 0) # Ingen exclusion om QR misslyckas
         
         # === SMART KUNDLISTA (BARA RIKTIGA MAPPAR) ===
         try:
@@ -959,30 +936,17 @@ class OptimizedTreeIndexer:
             customer_folders = []
         
         if customer_folders:
-            text_max_width = available_text_width
+            # === BORTTAGET: KUNDER/PROJEKT RUBRIK ===
+            # Vi börjar rendera listan direkt
             
-            # Kundlista rubrik
-            list_header = "Kunder/Projekt:"
-            try:
-                header_font = ImageFont.truetype(font_paths[0], 48)
-            except:
-                header_font = ImageFont.load_default()
-            
-            draw.text((margin, current_y), list_header, fill='black', font=header_font)
-            header_height = get_text_size(list_header, header_font)[1]
-            current_y += header_height + 10
-            
-            # Tillgänglig höjd för kundlista
+            # Tillgänglig höjd för kundlista (hela etiketten)
             total_available_height = height_px - current_y - margin
             
+            # === ANVÄND NYA DYNAMISKA FUNKTIONEN MED WRAPPING ===
             if total_available_height > 0:
-                optimal_customer_font_size = find_optimal_customer_list_font(
-                    customer_folders, text_max_width, total_available_height, draw
-                )
-                
-                render_customer_list_with_font(
-                    customer_folders, optimal_customer_font_size, text_max_width,
-                    total_available_height, margin, current_y, draw
+                render_wrapped_list(
+                    customer_folders, content_width, total_available_height, 
+                    margin, current_y, qr_rect, draw
                 )
         else:
             # Rita disk-statistik istället
@@ -990,7 +954,7 @@ class OptimizedTreeIndexer:
             
             current_y = self.draw_wrapped_text("Innehåll:", margin, current_y, 
                                              content_width, 
-                                             ImageFont.truetype(font_paths[0], 48) if font_paths else ImageFont.load_default(), 
+                                             ImageFont.truetype(font_paths[0], 12) if font_paths else ImageFont.load_default(), 
                                              draw)
             current_y += 5
             
@@ -1009,7 +973,7 @@ class OptimizedTreeIndexer:
             
             for stat_line in stat_lines:
                 try:
-                    small_font = ImageFont.truetype(font_paths[0], 36)
+                    small_font = ImageFont.truetype(font_paths[0], 10)
                 except:
                     small_font = ImageFont.load_default()
                     
@@ -1021,19 +985,22 @@ class OptimizedTreeIndexer:
             
             print("✅ Disk-statistik ritad")
         
-        # === HEADER LABEL (KORREKT 50x80mm med rätt layout) ===
+        # === HEADER LABEL (KORREKT 80x50mm LANDSKAPSLÄGE) ===
+        # FIX: Vi skapar denna i LANDSKAPSLÄGE (80x50) direkt istället för att rotera en 50x80 bild.
+        # Detta gör att text-skalningen använder den LÅNGA sidan (80mm) istället för den KORTA (50mm).
         
-        # SAMMA storlek som main label (50x80mm)
-        header = Image.new('RGB', (width_px, height_px), 'white')
+        header_width_px = height_px  # 80mm bred
+        header_height_px = width_px  # 50mm hög
+        
+        header = Image.new('RGB', (header_width_px, header_height_px), 'white')
         drawHeader = ImageDraw.Draw(header)
         
-        print(f"📏 Header Label: {width_px}x{height_px} pixels (KORREKT 50x80mm)")
+        print(f"📏 Header Label: {header_width_px}x{header_height_px} pixels (FIXAD: Landskapsläge för max textstorlek)")
         
-        header_margin = 30
-        header_content_height = 150  # Begränsa innehållet till övre delen
+        header_margin = 0
         
-        # === HEADER QR-KOD (högerjusterad, överkant) ===
-        header_qr_size = 120
+        # === HEADER QR-KOD (högerjusterad, centrerad vertikalt) ===
+        header_qr_size = 120 # ~15mm vid 203 DPI
         try:
             qr_header = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=2, border=1)
             qr_header.add_data(qr_url)
@@ -1042,9 +1009,11 @@ class OptimizedTreeIndexer:
             qr_header_img = qr_header.make_image(fill_color="black", back_color="white")
             qr_header_img = qr_header_img.resize((header_qr_size, header_qr_size), Image.Resampling.LANCZOS)
             
-            # Högerjusterad i överkant
-            header_qr_x = width_px - header_qr_size - header_margin
-            header_qr_y = header_margin
+            # Högerjusterad
+            header_qr_x = header_width_px - header_qr_size - header_margin
+            # Centrerad vertikalt
+            header_qr_y = (header_height_px - header_qr_size) // 2
+            
             header.paste(qr_header_img, (header_qr_x, header_qr_y))
             
             print(f"✅ Header QR-kod: {header_qr_size}x{header_qr_size}px (högerjusterad)")
@@ -1052,15 +1021,16 @@ class OptimizedTreeIndexer:
             print(f"❌ Header QR-kod fel: {e}")
             header_qr_size = 0
         
-        # === HEADER TEXT (vänsterjusterad, överkant, auto-skalad) ===
-        header_text_width = width_px - header_qr_size - (header_margin * 3)
-        header_text_height = header_content_height
+        # === HEADER TEXT (vänsterjusterad, max storlek) ===
+        # Texten får ta upp allt utrymme till vänster om QR-koden
+        header_text_width = header_width_px - header_qr_size - (header_margin * 3)
+        header_text_height = header_height_px - (header_margin * 2)
         
-        print(f"🔍 Auto-skalar header-text i {header_text_width}x{header_text_height}px")
+        print(f"🔍 Auto-skalar header-text i {header_text_width}x{header_text_height}px (NU använder den hela bredden!)")
         
-        # Auto-skala header-text
+        # Auto-skala header-text (Justerad för 203 DPI)
         header_optimal_font = None
-        for font_size in range(80, 5, -2):
+        for font_size in range(60, 5, -2): # Testar ännu större fonts (upp till 60px för 203 DPI)
             font_loaded = False
             for font_path in font_paths:
                 try:
@@ -1074,38 +1044,45 @@ class OptimizedTreeIndexer:
                 test_font = ImageFont.load_default()
             
             # Mät HELA disk-namnet för header
-            text_width, text_height = get_text_size(disk_name, test_font)
+            # Vi använder vår helper för att vara säker på mätningen
+            try:
+                bbox = drawHeader.textbbox((0, 0), disk_name, font=test_font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+            except:
+                text_width, text_height = drawHeader.textsize(disk_name, font=test_font)
             
             if text_width <= header_text_width and text_height <= header_text_height:
                 header_optimal_font = test_font
                 
-                # Vänsterjusterad, centrerad vertikalt inom content-området
+                # Vänsterjusterad, centrerad vertikalt
                 header_text_x = header_margin
-                header_text_y = header_margin + (header_content_height - text_height) // 2
+                header_text_y = (header_height_px - text_height) // 2
                 drawHeader.text((header_text_x, header_text_y), disk_name, fill='black', font=header_optimal_font)
                 
-                print(f"✅ Header text: {font_size}px (vänsterjusterad)")
+                print(f"✅ Header text: {font_size}px (vänsterjusterad, stor)")
                 break
         
-        # Rotera header 90 grader för utskrift
-        header_rotated = header.rotate(-90, expand=True)
-        print("✅ Header roterad 90° för utskrift")
-        
+        # Rotera header -90 grader för att passa utskrift (50x80mm)
+        # Texten blir vertikal
+        header_final = header.rotate(-90, expand=True)
+        print("✅ Header roterad -90° för utskrift (Portrait)")
+
         # === SPARA BÅDA LABELS ===
         try:
             # Main label
             label_file = output_file.replace('.json', '_label.jpg')
             img.save(label_file, 'JPEG', dpi=(dpi, dpi), quality=100)
             
-            # Roterad header
+            # Header label (Spara den roterade versionen)
             label_file_header = output_file.replace('.json', '_label_header.jpg')
-            header_rotated.save(label_file_header, 'JPEG', dpi=(dpi, dpi), quality=100)
+            header_final.save(label_file_header, 'JPEG', dpi=(dpi, dpi), quality=100)
             
             if os.path.exists(label_file):
                 print(f"✅ Main label: {label_file}")
             
             if os.path.exists(label_file_header):
-                print(f"✅ Header label: {label_file_header} (roterad)")
+                print(f"✅ Header label: {label_file_header} (korrekt skalad)")
             
             return label_file
             
